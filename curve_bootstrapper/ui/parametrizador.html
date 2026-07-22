@@ -119,7 +119,7 @@
     <input type="date" id="valdate">
   </div>
   <div class="spacer"></div>
-  <span class="status" id="status">28 curvas cargadas</span>
+  <span class="status" id="status">Cargando…</span>
   <button class="ghost" id="btn-quotes">Cargar quotes (CSV)</button>
   <button class="ghost" id="btn-import">Importar YAML</button>
   <button id="btn-preview">Ver YAML</button>
@@ -809,11 +809,34 @@ const $ = s => document.querySelector(s);
 
 function setStatus(msg, cls=""){ const el=$("#status"); el.textContent=msg; el.className="status "+cls; }
 
-function loadDefault(){
+function loadEmbeddedDefault(){
   const raw = $("#default-yaml").textContent;
   cfg = jsyaml.load(raw);
   selected = Object.keys(cfg.curves)[0];
   renderAll();
+}
+
+async function initConfig(){
+  if(!window.SERVER_MODE){
+    // Abierto como archivo local (sin `python server.py`) -- no hay backend
+    // al que llamar, esto es un modo soportado y esperado, no un error.
+    loadEmbeddedDefault();
+    setStatus("Modo archivo local — YAML de ejemplo embebido (puede estar desactualizado). Corre 'python server.py' para ver config/curves.yaml real.", "err");
+    return;
+  }
+  setStatus("Cargando config/curves.yaml…");
+  try{
+    const resp = await fetch("/config");
+    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    cfg = await resp.json();
+    selected = Object.keys(cfg.curves)[0];
+    renderAll();
+    setStatus(`Config cargada desde config/curves.yaml (${Object.keys(cfg.curves).length} curvas)`, "ok");
+  }catch(err){
+    console.error("GET /config falló:", err);
+    loadEmbeddedDefault();
+    setStatus("⚠ Usando configuración embebida (puede estar desactualizada) — /config no respondió: " + err.message, "err");
+  }
 }
 
 /* ================================================== niveles del DAG */
@@ -1244,7 +1267,7 @@ $("#btn-res-csv").onclick = async ()=>{
   URL.revokeObjectURL(a.href);
 };
 
-loadDefault();
+initConfig();
 </script>
 </body>
 </html>
