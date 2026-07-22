@@ -34,6 +34,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from curvelib.orchestrator import (load_config, build_bid_mid_ask,
                                    topological_order)
 from curvelib.quotes_loader import apply_quotes_sheet
+from curvelib.instruments import CONVENTION_SCHEMA
 
 HERE = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(HERE, "config", "curves.yaml")
@@ -61,6 +62,15 @@ def get_config():
     if isinstance(cfg.get("valuation_date"), (_dt.date, _dt.datetime)):
         cfg["valuation_date"] = cfg["valuation_date"].isoformat()
     return JSONResponse(cfg)
+
+
+@app.get("/schema")
+def get_schema():
+    """Catálogo de convenciones de curva válidas (nombre, tipo, valores
+    permitidos) -- consumido por el selector "+ Convención" de la UI para
+    no hardcodear nombres/valores en el HTML. Mismo principio que /config:
+    si el motor agrega una convención nueva, este endpoint la refleja sola."""
+    return JSONResponse(CONVENTION_SCHEMA)
 
 
 @app.post("/apply-quotes")

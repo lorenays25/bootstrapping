@@ -34,6 +34,17 @@ from .curve import Curve
 
 
 # ============================================================================
+# Constantes de valores válidos para convenciones de enum fijo. ÚNICA fuente
+# de verdad: tanto la validación en tiempo de build() como el CONVENTION_SCHEMA
+# expuesto a la UI (ver server.py GET /schema) leen estas mismas constantes —
+# nunca se repiten los valores a mano en un segundo lugar.
+# ============================================================================
+SHORT_END_STYLES = ("periodic", "bullet")
+ACCRUAL_CONVENTIONS = ("excl_spread", "incl_spread")
+RESET_POSITIONS = ("in_arrears", "in_advance")
+
+
+# ============================================================================
 # Contexto: acceso a curvas y FX spots por nombre
 # ============================================================================
 class CurveContext:
@@ -94,7 +105,13 @@ class Instrument(ABC):
         nativamente 'in_arrears' (compounding telescópico); el resto (deposit,
         ibor_swap, xccy_fixed_float, fra) son nativamente 'in_advance'."""
         declared = self.conv.get("reset_position")
-        if declared is not None and declared != self._native_reset:
+        if declared is None:
+            return
+        if declared not in RESET_POSITIONS:
+            raise ValueError(
+                f"reset_position={declared!r} inválido. Usa uno de {RESET_POSITIONS}."
+            )
+        if declared != self._native_reset:
             raise ValueError(
                 f"reset_position={declared!r} declarado en el YAML no es compatible "
                 f"con type={type(self).__name__!r} (asume reset_position="
@@ -131,9 +148,9 @@ class Instrument(ABC):
         comportamiento histórico; se puede sobreescribir por curva vía YAML."""
         freq = self.conv.get("fixed_freq", "A")
         style = self.conv.get("short_end_payment_style", self._short_end_default)
-        if style not in ("periodic", "bullet"):
+        if style not in SHORT_END_STYLES:
             raise ValueError(
-                f"short_end_payment_style={style!r} inválido. Usa 'periodic' o 'bullet'."
+                f"short_end_payment_style={style!r} inválido. Usa uno de {SHORT_END_STYLES}."
             )
         if style == "bullet" and dt.tenor_years(self.tenor) <= 1.0 + 1e-9:
             freq = "Z"
@@ -307,9 +324,9 @@ class XCCYBasis(Instrument):
         cp = ctx.curve(self.curve_names["projection"])    # RFR local (conocida)
         dc = self.conv.get("day_count", "ACT/360")
         mode = self.conv.get("accrual_convention", "excl_spread")
-        if mode not in ("excl_spread", "incl_spread"):
+        if mode not in ACCRUAL_CONVENTIONS:
             raise ValueError(
-                f"accrual_convention={mode!r} inválido. Usa 'excl_spread' o 'incl_spread'."
+                f"accrual_convention={mode!r} inválido. Usa uno de {ACCRUAL_CONVENTIONS}."
             )
         pay_delay = int(self.conv.get("pay_delay_days", 0))
         cal = self.conv.get("calendar", "WEEKENDS")
@@ -349,9 +366,9 @@ class TenorBasisSwap(Instrument):
         cd = ctx.curve(self.curve_names["discount"])     # descuento (SOFR)
         dc = self.conv.get("day_count", "ACT/360")
         mode = self.conv.get("accrual_convention", "excl_spread")
-        if mode not in ("excl_spread", "incl_spread"):
+        if mode not in ACCRUAL_CONVENTIONS:
             raise ValueError(
-                f"accrual_convention={mode!r} inválido. Usa 'excl_spread' o 'incl_spread'."
+                f"accrual_convention={mode!r} inválido. Usa uno de {ACCRUAL_CONVENTIONS}."
             )
         pay_delay = int(self.conv.get("pay_delay_days", 0))
         cal = self.conv.get("calendar", "WEEKENDS")
@@ -489,6 +506,93 @@ INSTRUMENT_TYPES = {
 # Default de quote_convention según el tipo, si el usuario no lo especifica
 # explícitamente en el YAML: los FRA cotizan en tasa, los futuros en precio.
 _DEFAULT_QUOTE_CONVENTION = {"fra": "rate", "future": "price"}
+
+
+# ============================================================================
+# Catálogo de convenciones de curva, expuesto a la UI vía GET /schema
+# (server.py). Cada campo "values"/"suggestions" deriva de la fuente de
+# verdad real (dicts de dates.py o las constantes de arriba) -- NUNCA de
+# valores tipeados a mano una segunda vez. Si el motor agrega un calendario,
+# day count, o valor de enum nuevo, este catálogo lo refleja solo.
+#
+# type:
+#   "enum"          -> valor debe ser uno de "values" (select estricto)
+#   "bool"          -> true/false (select true/false)
+#   "calendar"      -> texto libre; "suggestions" son códigos conocidos,
+#                      pero admite listas tipo "US,PE" (calendario conjunto)
+#   "day_count"     -> texto libre; "suggestions" son códigos conocidos
+#   "tenor_pattern" -> texto libre; "suggestions" son presets (A/S/Q/M/Z),
+#                      pero admite tenores explícitos (ej. 4W, 13W)
+#   "int"           -> texto libre numérico
+#   "string"        -> texto libre sin restricción
+# ============================================================================
+CONVENTION_SCHEMA = {
+    "calendar": {
+        "type": "calendar", "suggestions": dt.calendar_codes(),
+        "description": "Código de calendario, o lista tipo [US,PE] para calendario conjunto.",
+    },
+    "day_count": {
+        "type": "day_count", "suggestions": dt.day_count_codes(),
+        "description": "Day count de la pata fija.",
+    },
+    "float_day_count": {
+        "type": "day_count", "suggestions": dt.day_count_codes(),
+        "description": "Day count de la pata flotante (default: igual a day_count). Solo ibor_swap.",
+    },
+    "spot_lag": {
+        "type": "int", "default": 2,
+        "description": "Días hábiles de fecha de valuación a fecha spot.",
+    },
+    "fixed_freq": {
+        "type": "tenor_pattern", "suggestions": ["A", "S", "Q", "M", "Z"],
+        "description": "Frecuencia de pago fija: preset o tenor libre (ej. 4W para TIIE 28D).",
+    },
+    "float_freq": {
+        "type": "tenor_pattern", "suggestions": ["A", "S", "Q", "M"],
+        "description": "Frecuencia de pago flotante: preset o tenor libre. No aplica a ois_swap.",
+    },
+    "business_day_convention": {
+        "type": "enum", "values": dt.business_day_convention_codes(), "default": "MF",
+        "description": "Ajuste de fecha hábil (Modified Following, Following, Preceding, sin ajuste).",
+    },
+    "end_of_month": {
+        "type": "bool", "default": False,
+        "description": "Regla EOM en la generación de schedules.",
+    },
+    "short_end_payment_style": {
+        "type": "enum", "values": list(SHORT_END_STYLES),
+        "description": "Pago bullet o periódico en tenores <=1Y "
+                       "(default por type: bullet en ois_swap, periodic en el resto).",
+    },
+    "rate_cutoff_days": {
+        "type": "int", "default": 0,
+        "description": "Días hábiles de rate cutoff (compounding congelado). Solo ois_swap.",
+    },
+    "pay_delay_days": {
+        "type": "int", "default": 0,
+        "description": "Días hábiles entre fin de periodo de devengo y pago, ambas patas.",
+    },
+    "reset_position": {
+        "type": "enum", "values": list(RESET_POSITIONS),
+        "description": "Solo VALIDA contra el 'type' del instrumento; no cambia el pricing.",
+    },
+    "accrual_convention": {
+        "type": "enum", "values": list(ACCRUAL_CONVENTIONS), "default": "excl_spread",
+        "description": "Cómo compone el spread sobre el índice. Solo xccy_basis/tenor_basis.",
+    },
+    "fx_pair": {
+        "type": "string",
+        "description": "Par FX, ej. USDPEN. Solo fx_forward/xccy_fixed_float/xccy_basis.",
+    },
+    "solve_for": {
+        "type": "string",
+        "description": "quote_ccy | base_ccy -- qué lado del par FX es la incógnita.",
+    },
+    "points_factor": {
+        "type": "int",
+        "description": "Divisor de los puntos forward para llegar al outright.",
+    },
+}
 
 
 def _select_quote(spec: dict, side: str) -> float:

@@ -113,6 +113,23 @@ def get_day_counter(code: str) -> ql.DayCounter:
 
 
 # ---------------------------------------------------------------------------
+# Accessors de solo lectura para exponer los códigos válidos (p.ej. al
+# catálogo de convenciones de la UI) sin duplicar las claves de los dicts
+# privados de arriba.
+# ---------------------------------------------------------------------------
+def calendar_codes() -> List[str]:
+    return sorted(_CAL_FACTORY)
+
+
+def day_count_codes() -> List[str]:
+    return sorted(_DC_FACTORY)
+
+
+def business_day_convention_codes() -> List[str]:
+    return sorted(_BDC)
+
+
+# ---------------------------------------------------------------------------
 # Operaciones de fechas
 # ---------------------------------------------------------------------------
 def year_fraction(day_count: str, d1: _dt.date, d2: _dt.date) -> float:

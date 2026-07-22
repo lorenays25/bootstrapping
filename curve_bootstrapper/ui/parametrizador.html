@@ -802,6 +802,7 @@ curves:
 /* ============================================================== estado */
 let cfg = null;            // objeto de configuración (espejo del YAML)
 let selected = null;       // nombre de la curva seleccionada
+let schema = null;         // catálogo de convenciones (GET /schema); null = degrade a texto libre
 
 const INSTRUMENT_TYPES = ["ois_swap","ibor_swap","fra","future","fx_forward",
   "xccy_fixed_float","xccy_basis","tenor_basis","uvr_swap"];
@@ -830,6 +831,11 @@ async function initConfig(){
     if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     cfg = await resp.json();
     selected = Object.keys(cfg.curves)[0];
+    try{
+      const schemaResp = await fetch("/schema");
+      if(schemaResp.ok) schema = await schemaResp.json();
+    }catch(_){ /* catálogo opcional: si falla, los campos de convención
+                  vuelven a texto libre -- no debe tumbar la carga de /config */ }
     renderAll();
     setStatus(`Config cargada desde config/curves.yaml (${Object.keys(cfg.curves).length} curvas)`, "ok");
   }catch(err){
@@ -941,10 +947,35 @@ function renderEditor(){
 }
 
 function convRow(k,v){
-  const val = Array.isArray(v) ? v.join(",") : v;
-  return `<div class="conv-row">
-    <input class="conv-k" value="${k}" aria-label="clave">
-    <input class="conv-v" value="${val}" aria-label="valor">
+  const val = Array.isArray(v) ? v.join(",") : String(v??"");
+  const meta = schema && schema[k];
+
+  let keyField;
+  if(schema){
+    const used = new Set(Object.keys((cfg.curves[selected]||{}).conventions||{}));
+    const options = Object.keys(schema).filter(name=> name===k || !used.has(name)).sort();
+    keyField = `<select class="conv-k" aria-label="clave">
+      <option value="" ${k?"":"selected"}>— elegir —</option>
+      ${options.map(name=>`<option value="${name}" ${name===k?"selected":""}>${name}</option>`).join("")}
+      ${(k && !schema[k]) ? `<option value="${k}" selected>${k} (no catalogada)</option>` : ""}
+    </select>`;
+  } else {
+    keyField = `<input class="conv-k" value="${k}" aria-label="clave">`;
+  }
+
+  let valField;
+  if(meta && (meta.type==="enum" || meta.type==="bool")){
+    const values = meta.type==="bool" ? ["true","false"] : meta.values;
+    valField = `<select class="conv-v" aria-label="valor">
+      <option value="" ${val?"":"selected"}>— elegir —</option>
+      ${values.map(opt=>`<option value="${opt}" ${opt===val?"selected":""}>${opt}</option>`).join("")}
+      ${(val && !values.includes(val)) ? `<option value="${val}" selected>${val} (no catalogado)</option>` : ""}
+    </select>`;
+  } else {
+    valField = `<input class="conv-v" value="${val}" aria-label="valor">`;
+  }
+
+  return `<div class="conv-row">${keyField}${valField}
     <button class="row-del conv-del" aria-label="quitar">×</button></div>`;
 }
 
@@ -1003,13 +1034,24 @@ function bindEditor(){
       const k=r.querySelector(".conv-k").value.trim();
       let v=r.querySelector(".conv-v").value.trim();
       if(!k) return;
-      if(v.includes(",")) out[k]=v.split(",").map(s=>s.trim());
+      // "true"/"false" deben guardarse como boolean real, no como string --
+      // bool("false") en Python es True (string no vacío), así que guardar
+      // el string rompería silenciosamente end_of_month y similares.
+      if(v==="true") out[k]=true;
+      else if(v==="false") out[k]=false;
+      else if(v.includes(",")) out[k]=v.split(",").map(s=>s.trim());
       else if(v!=="" && !isNaN(v)) out[k]=parseFloat(v);
       else out[k]=v;
     });
     c.conventions=out;
   };
-  document.querySelectorAll(".conv-k,.conv-v").forEach(i=> i.onchange=syncConv);
+  document.querySelectorAll(".conv-v").forEach(i=> i.onchange=syncConv);
+  document.querySelectorAll(".conv-k").forEach(i=> i.onchange=()=>{
+    // cambiar la clave puede cambiar el TIPO del campo de valor (ej. de
+    // texto libre a select true/false) -- re-renderiza la fila para que
+    // el campo de valor se adapte a la clave recién elegida.
+    syncConv(); renderEditor();
+  });
   document.querySelectorAll(".conv-del").forEach(b=> b.onclick=()=>{ b.parentElement.remove(); syncConv(); });
   $("#btn-add-conv").onclick=()=>{
     $("#conv-rows").insertAdjacentHTML("beforeend", convRow("",""));
