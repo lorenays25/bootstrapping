@@ -1,0 +1,149 @@
+"""
+server.py — Microservicio FastAPI que conecta la interfaz HTML con el motor.
+
+Expone el pipeline de bootstrapping por HTTP para que el navegador pueda:
+  1. cargar la configuración por defecto (GET /config)
+  2. aplicar una hoja de quotes a una config (POST /apply-quotes)
+  3. construir las 28 curvas bid/mid/ask y devolver las tablas (POST /build)
+  4. descargar la tabla de una curva como CSV (POST /export-csv)
+
+Uso:
+    cd curve_bootstrapper
+    python server.py
+    # abre http://127.0.0.1:8000  (sirve la interfaz y la API juntas)
+
+El servidor sirve el HTML de ui/parametrizador.html en la raíz, de modo que
+no hay problemas de CORS ni de archivos locales: todo corre en el mismo
+origen http://127.0.0.1:8000.
+"""
+from __future__ import annotations
+
+import copy
+import datetime as _dt
+import io
+import os
+import sys
+import traceback
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+import yaml
+from fastapi import FastAPI, Body
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+
+from curvelib.orchestrator import (load_config, build_bid_mid_ask,
+                                   topological_order)
+from curvelib.quotes_loader import apply_quotes_sheet
+
+HERE = os.path.dirname(__file__)
+CONFIG_PATH = os.path.join(HERE, "config", "curves.yaml")
+UI_PATH = os.path.join(HERE, "ui", "parametrizador.html")
+
+app = FastAPI(title="curvelib bootstrapping API", version="0.4.0")
+
+
+# ---------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+def index():
+    """Sirve la interfaz. Inyecta una marca para que el HTML sepa que está
+    corriendo contra el servidor (y habilite el botón 'Construir')."""
+    with open(UI_PATH, encoding="utf-8") as f:
+        html = f.read()
+    html = html.replace("<!--SERVER_MODE-->", "<script>window.SERVER_MODE=true;</script>")
+    return HTMLResponse(html)
+
+
+@app.get("/config")
+def get_config():
+    """Devuelve la configuración por defecto (YAML -> JSON)."""
+    cfg = load_config(CONFIG_PATH)
+    # el YAML parsea valuation_date como date; JSON necesita string
+    if isinstance(cfg.get("valuation_date"), (_dt.date, _dt.datetime)):
+        cfg["valuation_date"] = cfg["valuation_date"].isoformat()
+    return JSONResponse(cfg)
+
+
+@app.post("/apply-quotes")
+def apply_quotes(payload: dict = Body(...)):
+    """Aplica una hoja de quotes CSV a la config recibida.
+    payload = {config: {...}, quotes_csv: "...", rate_scale: 0.01,
+               curve_map: {...}}"""
+    config = copy.deepcopy(payload["config"])
+    quotes_csv = payload.get("quotes_csv", "")
+    rate_scale = payload.get("rate_scale", 0.01)
+    curve_map = payload.get("curve_map") or None
+    try:
+        config, warnings = apply_quotes_sheet(
+            config, quotes_csv, curve_map=curve_map, rate_scale=rate_scale)
+        return {"ok": True, "config": config, "warnings": warnings}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/build")
+def build(payload: dict = Body(...)):
+    """Construye bid/mid/ask y devuelve las tablas de todas las curvas.
+    payload = {config: {...}, zero_day_count: "ACT/360"}
+    Cada curva se intenta por separado; si una falla, se reporta su error
+    sin abortar el resto (útil cuando editas quotes y algo queda inconsistente)."""
+    config = copy.deepcopy(payload["config"])
+    zdc = payload.get("zero_day_count", "ACT/360")
+
+    val_date = config["valuation_date"]
+    if isinstance(val_date, str):
+        val_date = _dt.date.fromisoformat(val_date[:10])
+
+    # Construcción global; si TODO falla, devolvemos el traceback.
+    try:
+        cs = build_bid_mid_ask(config, verbose=False)
+    except Exception as e:
+        return {"ok": False, "error": str(e),
+                "trace": traceback.format_exc().splitlines()[-6:]}
+
+    order = topological_order(config["curves"])
+    tables, errors = {}, {}
+    for name in order:
+        try:
+            rows = cs.table(name, zero_day_count=zdc)
+            tables[name] = [
+                {"date": r["date"].isoformat(), "offset": r["offset"],
+                 "zero_bid": r["zero_bid"] * 100, "zero_mid": r["zero_mid"] * 100,
+                 "zero_ask": r["zero_ask"] * 100, "df_bid": r["df_bid"],
+                 "df_mid": r["df_mid"], "df_ask": r["df_ask"]}
+                for r in rows
+            ]
+        except Exception as e:
+            errors[name] = str(e)
+
+    return {"ok": True, "order": order, "tables": tables, "errors": errors,
+            "valuation_date": val_date.isoformat()}
+
+
+@app.post("/export-csv", response_class=PlainTextResponse)
+def export_csv(payload: dict = Body(...)):
+    """Devuelve la tabla de una curva como texto CSV descargable.
+    payload = {config, name, zero_day_count}"""
+    config = copy.deepcopy(payload["config"])
+    name = payload["name"]
+    zdc = payload.get("zero_day_count", "ACT/360")
+    cs = build_bid_mid_ask(config, verbose=False)
+    rows = cs.table(name, zero_day_count=zdc)
+    buf = io.StringIO()
+    buf.write("Date,Offset,Zero Bid,Zero Mid,Zero Ask,Df Bid,Df Mid,Df Ask\n")
+    for r in rows:
+        buf.write(f"{r['date'].isoformat()},{r['offset']},"
+                  f"{r['zero_bid']*100:.5f},{r['zero_mid']*100:.5f},"
+                  f"{r['zero_ask']*100:.5f},{r['df_bid']:.8f},"
+                  f"{r['df_mid']:.8f},{r['df_ask']:.8f}\n")
+    return PlainTextResponse(buf.getvalue(),
+                             headers={"Content-Disposition":
+                                      f'attachment; filename="{name}.csv"'})
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("=" * 60)
+    print("  curvelib — servidor de bootstrapping")
+    print("  Abre:  http://127.0.0.1:8000")
+    print("=" * 60)
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")

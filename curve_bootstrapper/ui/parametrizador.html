@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parametrizador de Curvas — curvelib</title>
+<!--SERVER_MODE-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0D1420; --panel:#131C2B; --panel-2:#182436; --line:#243349;
+    --text:#D7DEE8; --muted:#7C8899; --amber:#F5A623; --amber-dim:#8a5f1a;
+    --cyan:#57B8C9; --red:#E06C6C; --green:#6CC08B;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --sans:'Space Grotesk',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--ink);color:var(--text);font-family:var(--sans);font-size:14px}
+  button{font-family:var(--mono);cursor:pointer;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--text);border-radius:4px;padding:7px 14px;font-size:12px}
+  button:hover{border-color:var(--amber)}
+  button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+  button.primary{background:var(--amber);color:#141414;border-color:var(--amber);font-weight:600}
+  button.ghost{background:transparent}
+  button.danger:hover{border-color:var(--red);color:var(--red)}
+  input,select{background:var(--ink);border:1px solid var(--line);color:var(--text);
+    border-radius:4px;padding:6px 8px;font-family:var(--mono);font-size:12.5px}
+  input:hover,select:hover{border-color:#33507a}
+  label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px}
+
+  /* ---------- top bar ---------- */
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:15px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+  header h1 span{color:var(--amber)}
+  .valdate{display:flex;align-items:center;gap:8px;margin-left:24px}
+  .valdate label{margin:0}
+  header .spacer{flex:1}
+  .status{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .status.ok{color:var(--green)} .status.err{color:var(--red)}
+
+  /* ---------- layout ---------- */
+  .wrap{display:grid;grid-template-columns:300px 1fr;height:calc(100vh - 61px)}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}}
+
+  /* ---------- rail (DAG) ---------- */
+  nav{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel);padding-bottom:24px}
+  .rail-section{padding:14px 16px 4px}
+  .rail-section h2{font-size:10.5px;color:var(--muted);letter-spacing:.14em;
+    text-transform:uppercase;margin-bottom:8px}
+  .fx-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .fx-row{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px}
+  .fx-row b{color:var(--muted);font-weight:500;width:58px}
+  .fx-row input{width:100%;padding:3px 6px;font-size:11.5px}
+  .level{margin-top:14px}
+  .level-head{display:flex;align-items:center;gap:8px;padding:0 16px;margin-bottom:6px}
+  .level-head .n{font-family:var(--mono);font-size:10px;color:var(--ink);
+    background:var(--amber);border-radius:3px;padding:1px 6px;font-weight:600}
+  .level-head .t{font-size:10.5px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+  .curve-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    background:transparent;border:none;border-left:2px solid transparent;
+    padding:7px 16px;font-family:var(--mono);font-size:12.5px;color:var(--text);border-radius:0}
+  .curve-item:hover{background:var(--panel-2)}
+  .curve-item.active{border-left-color:var(--amber);background:var(--panel-2);color:var(--amber)}
+  .curve-item .deps{margin-left:auto;font-size:9.5px;color:var(--muted)}
+  .add-curve{margin:16px;width:calc(100% - 32px)}
+
+  /* ---------- main editor ---------- */
+  main{overflow-y:auto;padding:22px 26px 60px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:18px 20px;margin-bottom:16px}
+  .card h3{font-size:11px;color:var(--muted);letter-spacing:.14em;
+    text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  .card h3::after{content:"";flex:1;height:1px;background:var(--line)}
+  .curve-title{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+  .curve-title input{font-size:17px;font-weight:600;padding:8px 12px;min-width:280px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .chip{font-family:var(--mono);font-size:10.5px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:3px;padding:2px 8px;color:var(--cyan)}
+  .chip button{border:none;background:none;color:var(--muted);padding:0 0 0 6px;font-size:11px}
+  .chip button:hover{color:var(--red)}
+
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;
+    text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-weight:500}
+  td{padding:4px 6px;border-bottom:1px solid #1b2739}
+  td input,td select{width:100%;padding:4px 6px;font-size:12px}
+  td.num input{text-align:right}
+  .row-del{color:var(--muted);background:none;border:none;padding:2px 6px;font-size:13px}
+  .row-del:hover{color:var(--red)}
+  .tbl-actions{margin-top:10px;display:flex;gap:8px}
+
+  .conv-row{display:grid;grid-template-columns:170px 1fr 32px;gap:8px;margin-bottom:7px;align-items:center}
+  .empty{color:var(--muted);font-family:var(--mono);font-size:12px;padding:8px 2px}
+
+  /* modal export */
+  dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:0;width:min(760px,92vw);max-height:82vh}
+  dialog#dlg-results{width:min(1000px,95vw)}
+  dialog::backdrop{background:rgba(5,9,15,.75)}
+  .dlg-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .dlg-head b{letter-spacing:.1em;text-transform:uppercase;font-size:12px}
+  .dlg-head .spacer{flex:1}
+  dialog pre{margin:0;padding:16px 18px;overflow:auto;max-height:58vh;
+    font-family:var(--mono);font-size:11.5px;line-height:1.55;color:#B9C6D8}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Parametrizador <span>·</span> Curvas de Descuento</h1>
+  <div class="valdate">
+    <label for="valdate">Fecha valuación</label>
+    <input type="date" id="valdate">
+  </div>
+  <div class="spacer"></div>
+  <span class="status" id="status">28 curvas cargadas</span>
+  <button class="ghost" id="btn-quotes">Cargar quotes (CSV)</button>
+  <button class="ghost" id="btn-import">Importar YAML</button>
+  <button id="btn-preview">Ver YAML</button>
+  <button class="primary" id="btn-build" style="display:none">▶ Construir curvas</button>
+  <button class="primary" id="btn-export">Descargar curves.yaml</button>
+  <input type="file" id="file-input" accept=".yaml,.yml" hidden>
+  <input type="file" id="quotes-input" accept=".csv,.txt" hidden>
+</header>
+
+<div class="wrap">
+  <nav>
+    <div class="rail-section">
+      <h2>FX Spots</h2>
+      <div class="fx-grid" id="fx-grid"></div>
+    </div>
+    <div class="rail-section" style="padding-bottom:0">
+      <h2>Curvas · orden de construcción</h2>
+    </div>
+    <div id="curve-list"></div>
+    <button class="add-curve" id="btn-add-curve">+ Nueva curva</button>
+  </nav>
+
+  <main id="editor"></main>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-head">
+    <b>curves.yaml</b><div class="spacer"></div>
+    <button id="btn-copy">Copiar</button>
+    <button class="ghost" id="btn-close">Cerrar</button>
+  </div>
+  <pre id="yaml-out"></pre>
+</dialog>
+
+<dialog id="dlg-quotes">
+  <div class="dlg-head">
+    <b>Cargar hoja de quotes (bid / mid / ask)</b><div class="spacer"></div>
+    <button class="ghost" id="btn-quotes-close">Cerrar</button>
+  </div>
+  <div style="padding:16px 18px">
+    <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin-bottom:12px">
+      Pega o carga un CSV con las cotizaciones de mercado. Cada fila se
+      empareja con un instrumento del YAML por <b>índice + tenor</b>, y sus
+      valores bid/mid/ask reemplazan al quote. Al construir, el motor corre
+      tres bootstraps (bid, mid, ask).
+    </p>
+    <div class="card" style="background:var(--ink);margin-bottom:12px">
+      <h3 style="margin-bottom:8px">Formato esperado</h3>
+      <pre style="font-size:11px;color:var(--cyan);padding:0;max-height:none">Quote Name,Type,BID,MID,ASK
+MM.USD.SOFR.ON.LIBOR01,Yield,3.66000,3.66000,3.66000
+Swap.1M.USD.SOFR.1D/1Y.LIBOR01,Yield,3.65491,3.65950,3.66409
+Swap.5Y.USD.SOFR.1D/1Y.LIBOR01,Yield,3.93579,3.93925,3.94271</pre>
+      <p style="color:var(--muted);font-size:11px;margin-top:8px;line-height:1.6">
+        · Prefijos reconocidos: <b>MM</b> (depósito), <b>Swap</b>/<b>IRS</b>,
+        <b>FRA</b>, <b>Fut</b>, <b>FX</b>/<b>Fwd</b>, <b>XCCY</b>.<br>
+        · El <b>Quote Name</b> se lee como <code>Tipo.Tenor.Divisa.Índice…</code>
+        (MM lo lee como <code>MM.Divisa.Índice.Tenor</code>).<br>
+        · Los valores se interpretan en <b>%</b> (3.939 → 0.03939).<br>
+        · El índice (SOFR, ESTR…) se usa para ubicar la curva destino en el YAML.
+      </p>
+    </div>
+    <label for="quotes-text">Pega el CSV aquí o usa "Cargar CSV"</label>
+    <textarea id="quotes-text" spellcheck="false" style="width:100%;height:150px;
+      background:var(--ink);border:1px solid var(--line);color:var(--text);
+      border-radius:4px;padding:10px;font-family:var(--mono);font-size:11.5px;
+      resize:vertical"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+      <button id="btn-quotes-file">Cargar CSV…</button>
+      <button class="primary" id="btn-quotes-apply">Aplicar al YAML</button>
+      <span class="status" id="quotes-status" style="margin-left:auto"></span>
+    </div>
+    <div id="quotes-report" style="margin-top:12px;font-family:var(--mono);
+      font-size:11px;color:var(--muted);max-height:120px;overflow:auto"></div>
+  </div>
+</dialog>
+
+<dialog id="dlg-results">
+  <div class="dlg-head">
+    <b>Curvas construidas — bid / mid / ask</b>
+    <div class="spacer"></div>
+    <select id="res-curve" style="margin-right:8px"></select>
+    <button id="btn-res-csv">Descargar CSV</button>
+    <button class="ghost" id="btn-res-close">Cerrar</button>
+  </div>
+  <div style="padding:14px 18px">
+    <div id="res-summary" style="font-family:var(--mono);font-size:11.5px;
+      color:var(--muted);margin-bottom:12px"></div>
+    <div style="overflow:auto;max-height:52vh">
+      <table id="res-table" style="font-size:11.5px">
+        <thead><tr>
+          <th>Date</th><th style="text-align:right">Offset</th>
+          <th style="text-align:right">Zero Bid</th><th style="text-align:right">Zero Mid</th>
+          <th style="text-align:right">Zero Ask</th>
+          <th style="text-align:right">Df Bid</th><th style="text-align:right">Df Mid</th>
+          <th style="text-align:right">Df Ask</th>
+        </tr></thead>
+        <tbody id="res-body"></tbody>
+      </table>
+    </div>
+  </div>
+</dialog>
+
+<script type="text/plain" id="default-yaml"># =============================================================================
+# curves.yaml — Configuración de las 28 curvas del sistema
+# =============================================================================
+# ¡IMPORTANTE!  Todos los quotes son DATOS DE EJEMPLO (niveles plausibles pero
+# ficticios) para que el sistema corra end-to-end. Reemplázalos con tu data
+# de mercado real.
+#
+# Unidades:
+#   - Tasas y basis:  DECIMAL       (3.70% -> 0.0370 ;  -15 bp -> -0.0015)
+#   - Puntos forward: PUNTOS        (se dividen por points_factor)
+#   - FX spots:       outright
+#
+# Campos por curva:
+#   mode:        sequential | global
+#   discount:    self | <nombre de curva>     (semántica de descuento)
+#   projection:  self | <nombre de curva>     (curva de proyección de forwards)
+#   other_leg:   <curva de la otra moneda>    (solo para fx_forward)
+#   depends_on:  [curvas que deben construirse antes]
+#   conventions: calendar, day_count, spot_lag, fixed_freq, float_freq,
+#                fx_pair, solve_for, points_factor, ...
+# =============================================================================
+
+valuation_date: 2026-07-02
+
+market_data:
+  fx_spots:
+    USDPEN: 3.5500
+    USDCOP: 4100.00
+    USDCLP: 930.00
+    USDBRL: 5.4000
+    USDMXN: 18.500
+    USDJPY: 150.00
+    USDCHF: 0.8800
+    USDCAD: 1.3600
+    USDSEK: 10.500
+    USDCNH: 7.2000
+    EURUSD: 1.0900
+    GBPUSD: 1.2700
+
+curves:
+
+  # ===========================================================================
+  # NIVEL 0 — Curvas autónomas self-discounting (RFR OIS + TIIE doméstica)
+  # ===========================================================================
+
+  USD_SOFR:
+    # Pilares y quotes bid/mid/ask tomados de la pantalla de mercado.
+    # El pilar corto es un depósito MM overnight; el resto son OIS swaps.
+    # Formato de quote por lado: {bid, mid, ask}. (Si cargas la hoja de
+    # quotes vía quotes_loader, estos valores se sobreescriben.)
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: US, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: mm,       tenor: "ON", quote: {bid: 0.0366000, mid: 0.0366000, ask: 0.0366000}}
+      - {type: ois_swap, tenor: 1M,  quote: {bid: 0.0365491, mid: 0.0365950, ask: 0.0366409}}
+      - {type: ois_swap, tenor: 2M,  quote: {bid: 0.0368304, mid: 0.0368811, ask: 0.0369317}}
+      - {type: ois_swap, tenor: 3M,  quote: {bid: 0.0371592, mid: 0.0372150, ask: 0.0372708}}
+      - {type: ois_swap, tenor: 6M,  quote: {bid: 0.0382421, mid: 0.0382790, ask: 0.0383159}}
+      - {type: ois_swap, tenor: 9M,  quote: {bid: 0.0390253, mid: 0.0391000, ask: 0.0391747}}
+      - {type: ois_swap, tenor: 1Y,  quote: {bid: 0.0397271, mid: 0.0397500, ask: 0.0397729}}
+      - {type: ois_swap, tenor: 18M, quote: {bid: 0.0397978, mid: 0.0398350, ask: 0.0398722}}
+      - {type: ois_swap, tenor: 2Y,  quote: {bid: 0.0398595, mid: 0.0398825, ask: 0.0399055}}
+      - {type: ois_swap, tenor: 3Y,  quote: {bid: 0.0395206, mid: 0.0395449, ask: 0.0395693}}
+      - {type: ois_swap, tenor: 4Y,  quote: {bid: 0.0393444, mid: 0.0393614, ask: 0.0393783}}
+      - {type: ois_swap, tenor: 5Y,  quote: {bid: 0.0393579, mid: 0.0393925, ask: 0.0394271}}
+      - {type: ois_swap, tenor: 6Y,  quote: {bid: 0.0395291, mid: 0.0395515, ask: 0.0395739}}
+      - {type: ois_swap, tenor: 7Y,  quote: {bid: 0.0397599, mid: 0.0397775, ask: 0.0397951}}
+      - {type: ois_swap, tenor: 8Y,  quote: {bid: 0.0400077, mid: 0.0400310, ask: 0.0400543}}
+      - {type: ois_swap, tenor: 9Y,  quote: {bid: 0.0403002, mid: 0.0403230, ask: 0.0403458}}
+      - {type: ois_swap, tenor: 10Y, quote: {bid: 0.0406142, mid: 0.0406375, ask: 0.0406608}}
+      - {type: ois_swap, tenor: 12Y, quote: {bid: 0.0412462, mid: 0.0412692, ask: 0.0412921}}
+      - {type: ois_swap, tenor: 15Y, quote: {bid: 0.0420807, mid: 0.0421091, ask: 0.0421374}}
+      - {type: ois_swap, tenor: 20Y, quote: {bid: 0.0427755, mid: 0.0428047, ask: 0.0428338}}
+      - {type: ois_swap, tenor: 25Y, quote: {bid: 0.0427266, mid: 0.0427547, ask: 0.0427827}}
+      - {type: ois_swap, tenor: 30Y, quote: {bid: 0.0423361, mid: 0.0423665, ask: 0.0423969}}
+
+  EUR_ESTR:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: TARGET, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0200}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0201}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0202}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0205}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0210}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0225}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0245}
+      - {type: ois_swap, tenor: 20Y, quote: 0.0255}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0250}
+
+  GBP_SONIA:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: UK, day_count: ACT/365, spot_lag: 0, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0390}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0391}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0390}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0385}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0375}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0365}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0370}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0375}
+
+  CHF_SARON:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CH, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0030}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0031}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0032}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0035}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0042}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0060}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0085}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0095}
+
+  JPY_TONAR:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: JP, day_count: ACT/365, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0070}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0072}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0075}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0080}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0092}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0120}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0155}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0210}
+
+  CAD_CORRA:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CA, day_count: ACT/365, spot_lag: 1, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0280}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0281}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0280}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0278}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0275}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0280}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0295}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0310}
+
+  MXN_TIIE_28D:
+    # Curva de proyección TIIE 28d DESCONTADA CONSIGO MISMA (self-discounted).
+    # Periodicidad EXACTA de 4 semanas (28 días) en ambas patas, confirmada
+    # por pantalla ("Freq: LUN" en fixed y float) — no es un mes calendario.
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: MX, day_count: ACT/360, spot_lag: 1,
+                  fixed_freq: 4W, float_freq: 4W}
+    instruments:
+      - {type: ibor_swap, tenor: 3M,  quote: 0.0800}
+      - {type: ibor_swap, tenor: 6M,  quote: 0.0795}
+      - {type: ibor_swap, tenor: 1Y,  quote: 0.0785}
+      - {type: ibor_swap, tenor: 2Y,  quote: 0.0770}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0755}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0760}
+
+  # ===========================================================================
+  # NIVEL 1 — Curvas que dependen de su RFR / domésticas
+  # ===========================================================================
+
+  USD_FEDFUNDS:
+    # Construcción secuencial vía basis Fed Funds vs SOFR.
+    # Incógnita: proyección EFFR. Descuento: USD_SOFR.
+    # quote = spread s de la pata FF tal que FF+s = SOFR (en PV).
+    mode: sequential
+    discount: USD_SOFR
+    projection: USD_SOFR          # pata base contra la que se mide el basis
+    depends_on: [USD_SOFR]
+    conventions: {calendar: US, day_count: ACT/360, spot_lag: 2, float_freq: Q}
+    instruments:
+      - {type: tenor_basis, tenor: 3M,  quote: -0.00050}
+      - {type: tenor_basis, tenor: 6M,  quote: -0.00050}
+      - {type: tenor_basis, tenor: 1Y,  quote: -0.00048}
+      - {type: tenor_basis, tenor: 2Y,  quote: -0.00045}
+      - {type: tenor_basis, tenor: 5Y,  quote: -0.00040}
+      - {type: tenor_basis, tenor: 10Y, quote: -0.00035}
+
+  EURIBOR_3M:
+    # Parte corta: futuros STIR ICE 3M EURIBOR (tiras trimestrales
+    # consecutivas). Parte larga: swaps desde 3Y. Día 30E/360 en la pata
+    # fija confirmado en pantalla (no ACT/360 como en las OIS).
+    mode: sequential
+    discount: EUR_ESTR
+    projection: self
+    depends_on: [EUR_ESTR]
+    conventions: {calendar: TARGET, day_count: 30E/360, float_day_count: ACT/360,
+                  spot_lag: 2, fixed_freq: A, float_freq: Q}
+    instruments:
+      - {type: future, tenor: 3Mx6M,   quote: 97.85, quote_convention: price}
+      - {type: future, tenor: 6Mx9M,   quote: 97.75, quote_convention: price}
+      - {type: future, tenor: 9Mx12M,  quote: 97.68, quote_convention: price}
+      - {type: future, tenor: 12Mx15M, quote: 97.65, quote_convention: price}
+      - {type: future, tenor: 15Mx18M, quote: 97.62, quote_convention: price}
+      - {type: future, tenor: 18Mx21M, quote: 97.60, quote_convention: price}
+      - {type: future, tenor: 21Mx24M, quote: 97.58, quote_convention: price, convexity_bp: 0.5}
+      - {type: ibor_swap, tenor: 3Y,  quote: 0.0224}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0235}
+      - {type: ibor_swap, tenor: 7Y,  quote: 0.0244}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0255}
+      - {type: ibor_swap, tenor: 20Y, quote: 0.0265}
+      - {type: ibor_swap, tenor: 30Y, quote: 0.0260}
+
+  EURIBOR_6M:
+    # Parte corta: FRAs (notación 'start x end', p.ej. 1Mx7M = FRA a 1M que
+    # fija una tasa 6M). Parte larga: swaps desde 2Y. 30E/360 en pata fija.
+    mode: sequential
+    discount: EUR_ESTR
+    projection: self
+    depends_on: [EUR_ESTR]
+    conventions: {calendar: TARGET, day_count: 30E/360, float_day_count: ACT/360,
+                  spot_lag: 2, fixed_freq: A, float_freq: S}
+    instruments:
+      - {type: fra, tenor: 1Mx7M,  quote: 0.0216}
+      - {type: fra, tenor: 2Mx8M,  quote: 0.0218}
+      - {type: fra, tenor: 3Mx9M,  quote: 0.0219}
+      - {type: fra, tenor: 4Mx10M, quote: 0.0220}
+      - {type: fra, tenor: 5Mx11M, quote: 0.0221}
+      - {type: fra, tenor: 6Mx12M, quote: 0.0222}
+      - {type: ibor_swap, tenor: 2Y,  quote: 0.0227}
+      - {type: ibor_swap, tenor: 3Y,  quote: 0.0233}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0242}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0262}
+      - {type: ibor_swap, tenor: 20Y, quote: 0.0272}
+      - {type: ibor_swap, tenor: 30Y, quote: 0.0267}
+
+  SEK_STIBOR_3M:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: SE, day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: A, float_freq: Q}
+    instruments:
+      - {type: ibor_swap, tenor: 6M,  quote: 0.0222}
+      - {type: ibor_swap, tenor: 1Y,  quote: 0.0225}
+      - {type: ibor_swap, tenor: 2Y,  quote: 0.0230}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0245}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0262}
+      - {type: ibor_swap, tenor: 20Y, quote: 0.0270}
+
+  PEN_OIS_TIBO:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: PE, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0430}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0432}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0435}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0445}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0470}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0500}
+
+  COP_OIS_IBR:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CO, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0850}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0845}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0830}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0805}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0780}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0790}
+      - {type: ois_swap, tenor: 15Y, quote: 0.0800}
+
+  CLP_CAMARA:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CL, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0480}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0478}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0472}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0465}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0460}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0470}
+      - {type: ois_swap, tenor: 20Y, quote: 0.0480}
+
+  # ===========================================================================
+  # NIVEL 2 — Cross-currency (colateral USD SOFR)
+  #   Parte corta: fx_forward (puntos fwd) | Parte larga: XCCY
+  #   LatAm: xccy_fixed_float (NDS fija local vs USD SOFR)
+  #   G10:   xccy_basis (flotante RFR local + basis vs USD SOFR)
+  # ===========================================================================
+
+  PEN_X_SOFR:
+    mode: sequential
+    discount: self                 # esta ES la curva de descuento PEN coll. USD
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, PE], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDPEN, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 24}
+      - {type: fx_forward, tenor: 3M, quote: 71}
+      - {type: fx_forward, tenor: 6M, quote: 142}
+      - {type: fx_forward, tenor: 1Y, quote: 288}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0455}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0462}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0478}
+      - {type: xccy_fixed_float, tenor: 7Y,  quote: 0.0492}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0510}
+
+  COP_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, CO], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDCOP, solve_for: quote_ccy,
+                  points_factor: 1}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 18}
+      - {type: fx_forward, tenor: 3M, quote: 54}
+      - {type: fx_forward, tenor: 6M, quote: 110}
+      - {type: fx_forward, tenor: 1Y, quote: 225}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0815}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0800}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0790}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0805}
+
+  CLP_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, CL], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDCLP, solve_for: quote_ccy,
+                  points_factor: 1}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 0.85}
+      - {type: fx_forward, tenor: 3M, quote: 2.60}
+      - {type: fx_forward, tenor: 6M, quote: 5.20}
+      - {type: fx_forward, tenor: 1Y, quote: 10.50}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0472}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0468}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0466}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0478}
+
+  BRL_X_SOFR:
+    # Parte corta con puntos NDF, parte larga con XCCY (fija BRL vs SOFR).
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, BR], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDBRL, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 328}
+      - {type: fx_forward, tenor: 3M, quote: 990}
+      - {type: fx_forward, tenor: 6M, quote: 2010}
+      - {type: fx_forward, tenor: 1Y, quote: 4120}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.1080}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.1065}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.1050}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.1060}
+
+  MXN_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, MX], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDMXN, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 663}
+      - {type: fx_forward, tenor: 3M, quote: 2000}
+      - {type: fx_forward, tenor: 6M, quote: 4050}
+      - {type: fx_forward, tenor: 1Y, quote: 8300}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0775}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0765}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0758}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0768}
+
+  EUR_X_USD:
+    mode: sequential
+    discount: self
+    projection: EUR_ESTR           # forwards de la pata flotante EUR
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, EUR_ESTR]
+    conventions: {calendar: [US, TARGET], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: EURUSD, solve_for: base_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 15.4}
+      - {type: fx_forward, tenor: 3M, quote: 46}
+      - {type: fx_forward, tenor: 6M, quote: 93}
+      - {type: fx_forward, tenor: 1Y, quote: 188}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0012}
+      - {type: xccy_basis, tenor: 3Y,  quote: -0.0013}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0015}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0018}
+      - {type: xccy_basis, tenor: 20Y, quote: -0.0020}
+
+  JPY_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: JPY_TONAR
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, JPY_TONAR]
+    conventions: {calendar: [US, JP], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: USDJPY, solve_for: quote_ccy,
+                  points_factor: 100}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -37.5}
+      - {type: fx_forward, tenor: 3M, quote: -112}
+      - {type: fx_forward, tenor: 6M, quote: -225}
+      - {type: fx_forward, tenor: 1Y, quote: -455}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0028}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0035}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0040}
+      - {type: xccy_basis, tenor: 20Y, quote: -0.0042}
+
+  CHF_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: CHF_SARON
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, CHF_SARON]
+    conventions: {calendar: [US, CH], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: USDCHF, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -25}
+      - {type: fx_forward, tenor: 3M, quote: -75}
+      - {type: fx_forward, tenor: 6M, quote: -150}
+      - {type: fx_forward, tenor: 1Y, quote: -300}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0010}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0013}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0016}
+
+  GBP_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: GBP_SONIA
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, GBP_SONIA]
+    conventions: {calendar: [US, UK], day_count: ACT/365, spot_lag: 0,
+                  float_freq: Q, fx_pair: GBPUSD, solve_for: base_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -2.1}
+      - {type: fx_forward, tenor: 3M, quote: -6.4}
+      - {type: fx_forward, tenor: 6M, quote: -12.7}
+      - {type: fx_forward, tenor: 1Y, quote: -25.6}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0003}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0005}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0007}
+
+  CAD_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: CAD_CORRA
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, CAD_CORRA]
+    conventions: {calendar: [US, CA], day_count: ACT/365, spot_lag: 1,
+                  float_freq: Q, fx_pair: USDCAD, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -10}
+      - {type: fx_forward, tenor: 3M, quote: -31}
+      - {type: fx_forward, tenor: 6M, quote: -61}
+      - {type: fx_forward, tenor: 1Y, quote: -123}
+      - {type: xccy_basis, tenor: 2Y,  quote: 0.0004}
+      - {type: xccy_basis, tenor: 5Y,  quote: 0.0005}
+      - {type: xccy_basis, tenor: 10Y, quote: 0.0006}
+
+  SEK_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: SEK_STIBOR_3M      # basis cotizado contra STIBOR 3M
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, SEK_STIBOR_3M]
+    conventions: {calendar: [US, SE], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: USDSEK, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -131}
+      - {type: fx_forward, tenor: 3M, quote: -394}
+      - {type: fx_forward, tenor: 6M, quote: -788}
+      - {type: fx_forward, tenor: 1Y, quote: -1590}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0016}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0020}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0024}
+
+  CNH_OFFSHORE:
+    # Curva CNH implícita PURAMENTE offshore: solo puntos forward USD/CNH.
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, CN], day_count: ACT/360, spot_lag: 2,
+                  fx_pair: USDCNH, solve_for: quote_ccy, points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -102}
+      - {type: fx_forward, tenor: 3M, quote: -306}
+      - {type: fx_forward, tenor: 6M, quote: -612}
+      - {type: fx_forward, tenor: 9M, quote: -920}
+      - {type: fx_forward, tenor: 1Y, quote: -1230}
+      - {type: fx_forward, tenor: 2Y, quote: -2400}
+
+  # ===========================================================================
+  # NIVEL 3 — Implícitas / derivadas
+  # ===========================================================================
+
+  USD_IMPL_TIBO:
+    # USD implícita: incógnita = DF USD, dado FX fwd USD/PEN y la curva
+    # doméstica PEN TIBO. Misma data FX que PEN_X_SOFR, distinta incógnita.
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: PEN_OIS_TIBO        # la pata conocida ahora es la PEN doméstica
+    depends_on: [PEN_OIS_TIBO]
+    conventions: {calendar: [US, PE], day_count: ACT/360, spot_lag: 2,
+                  fx_pair: USDPEN, solve_for: base_ccy, points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 24}
+      - {type: fx_forward, tenor: 3M, quote: 71}
+      - {type: fx_forward, tenor: 6M, quote: 142}
+      - {type: fx_forward, tenor: 1Y, quote: 288}
+      - {type: fx_forward, tenor: 2Y, quote: 590}
+
+  UVR_IBR:
+    # Curva de DESCUENTO de flujos UVR, construida secuencialmente a partir
+    # de swaps UVR vs IBR, después de tener COP_OIS_IBR (dependencia).
+    # quote = tasa fija real (UVR) del swap.
+    mode: sequential
+    discount: self
+    projection: COP_OIS_IBR
+    depends_on: [COP_OIS_IBR]
+    conventions: {calendar: CO, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: uvr_swap, tenor: 1Y,  quote: 0.0420}
+      - {type: uvr_swap, tenor: 2Y,  quote: 0.0415}
+      - {type: uvr_swap, tenor: 5Y,  quote: 0.0405}
+      - {type: uvr_swap, tenor: 10Y, quote: 0.0400}
+      - {type: uvr_swap, tenor: 15Y, quote: 0.0398}
+</script>
+
+<script>
+/* ============================================================== estado */
+let cfg = null;            // objeto de configuración (espejo del YAML)
+let selected = null;       // nombre de la curva seleccionada
+
+const INSTRUMENT_TYPES = ["ois_swap","ibor_swap","fra","future","fx_forward",
+  "xccy_fixed_float","xccy_basis","tenor_basis","uvr_swap"];
+const $ = s => document.querySelector(s);
+
+function setStatus(msg, cls=""){ const el=$("#status"); el.textContent=msg; el.className="status "+cls; }
+
+function loadDefault(){
+  const raw = $("#default-yaml").textContent;
+  cfg = jsyaml.load(raw);
+  selected = Object.keys(cfg.curves)[0];
+  renderAll();
+}
+
+/* ================================================== niveles del DAG */
+function levelOf(name, memo={}){
+  if(name in memo) return memo[name];
+  const deps = (cfg.curves[name]?.depends_on)||[];
+  memo[name] = deps.length ? 1 + Math.max(...deps.map(d=>levelOf(d,memo))) : 0;
+  return memo[name];
+}
+
+/* ================================================== render: rail */
+function renderRail(){
+  // fx spots
+  const fx = cfg.market_data?.fx_spots || {};
+  $("#fx-grid").innerHTML = Object.entries(fx).map(([p,v])=>`
+    <div class="fx-row"><b>${p}</b>
+      <input data-fx="${p}" value="${v}" aria-label="Spot ${p}"></div>`).join("");
+  document.querySelectorAll("[data-fx]").forEach(inp=>{
+    inp.onchange = ()=>{ cfg.market_data.fx_spots[inp.dataset.fx]=parseFloat(inp.value)||0; };
+  });
+
+  // curvas agrupadas por nivel
+  const memo={}; const byLevel={};
+  Object.keys(cfg.curves).forEach(n=>{
+    const l=levelOf(n,memo); (byLevel[l]=byLevel[l]||[]).push(n);
+  });
+  const names={0:"autónomas",1:"dependientes RFR",2:"cross colateral",3:"implícitas / derivadas"};
+  $("#curve-list").innerHTML = Object.keys(byLevel).sort((a,b)=>a-b).map(l=>`
+    <div class="level">
+      <div class="level-head"><span class="n">N${l}</span>
+        <span class="t">${names[l]||("nivel "+l)}</span></div>
+      ${byLevel[l].map(n=>`
+        <button class="curve-item ${n===selected?'active':''}" data-curve="${n}">
+          ${n}<span class="deps">${(cfg.curves[n].depends_on||[]).length?'← '+(cfg.curves[n].depends_on||[]).length:''}</span>
+        </button>`).join("")}
+    </div>`).join("");
+  document.querySelectorAll("[data-curve]").forEach(b=>{
+    b.onclick = ()=>{ selected=b.dataset.curve; renderAll(); };
+  });
+}
+
+/* ================================================== render: editor */
+function renderEditor(){
+  const c = cfg.curves[selected];
+  if(!c){ $("#editor").innerHTML='<p class="empty">Selecciona una curva.</p>'; return; }
+  const curveNames = Object.keys(cfg.curves).filter(n=>n!==selected);
+  const refOptions = sel => ['self',...curveNames].map(n=>
+    `<option ${n===(sel||'self')?'selected':''}>${n}</option>`).join("");
+
+  $("#editor").innerHTML = `
+  <div class="curve-title">
+    <input id="c-name" value="${selected}" aria-label="Nombre de la curva">
+    <button class="danger ghost" id="btn-del-curve">Eliminar curva</button>
+  </div>
+
+  <div class="card">
+    <h3>Construcción</h3>
+    <div class="grid">
+      <div><label>Modo</label>
+        <select id="c-mode">
+          <option ${c.mode==='sequential'?'selected':''}>sequential</option>
+          <option ${c.mode==='global'?'selected':''}>global</option>
+        </select></div>
+      <div><label>Descuento</label><select id="c-disc">${refOptions(c.discount)}</select></div>
+      <div><label>Proyección</label><select id="c-proj">${refOptions(c.projection)}</select></div>
+      <div><label>Otra pata (FX fwd)</label>
+        <select id="c-other"><option value="">—</option>${curveNames.map(n=>
+          `<option ${n===c.other_leg?'selected':''}>${n}</option>`).join("")}</select></div>
+    </div>
+    <div style="margin-top:14px">
+      <label>Depende de</label>
+      <div class="chips" id="dep-chips">
+        ${(c.depends_on||[]).map(d=>`<span class="chip">${d}<button data-deldep="${d}" aria-label="quitar ${d}">×</button></span>`).join("")}
+        <select id="dep-add" style="min-width:150px"><option value="">+ agregar…</option>
+          ${curveNames.filter(n=>!(c.depends_on||[]).includes(n)).map(n=>`<option>${n}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Convenciones</h3>
+    <div id="conv-rows">
+      ${Object.entries(c.conventions||{}).map(([k,v])=>convRow(k,v)).join("")}
+    </div>
+    <div class="tbl-actions"><button id="btn-add-conv">+ Convención</button></div>
+  </div>
+
+  <div class="card">
+    <h3>Instrumentos · ${(c.instruments||[]).length}</h3>
+    <table>
+      <thead><tr><th style="width:190px">Tipo</th><th style="width:90px">Tenor</th>
+        <th style="width:130px">Quote</th><th>Overrides (clave=valor, …)</th><th></th></tr></thead>
+      <tbody id="ins-body">
+        ${(c.instruments||[]).map((ins,i)=>insRow(ins,i)).join("")}
+      </tbody>
+    </table>
+    <div class="tbl-actions"><button id="btn-add-ins">+ Instrumento</button></div>
+  </div>`;
+
+  bindEditor();
+}
+
+function convRow(k,v){
+  const val = Array.isArray(v) ? v.join(",") : v;
+  return `<div class="conv-row">
+    <input class="conv-k" value="${k}" aria-label="clave">
+    <input class="conv-v" value="${val}" aria-label="valor">
+    <button class="row-del conv-del" aria-label="quitar">×</button></div>`;
+}
+
+function insRow(ins,i){
+  const extras = Object.entries(ins).filter(([k])=>!["type","tenor","quote"].includes(k))
+    .map(([k,v])=>`${k}=${v}`).join(", ");
+  return `<tr data-i="${i}">
+    <td><select class="ins-type">${INSTRUMENT_TYPES.map(t=>
+      `<option ${t===ins.type?'selected':''}>${t}</option>`).join("")}</select></td>
+    <td><input class="ins-tenor" value="${ins.tenor}"></td>
+    <td class="num"><input class="ins-quote" value="${ins.quote}"></td>
+    <td><input class="ins-extra" value="${extras}" placeholder="—"></td>
+    <td><button class="row-del ins-del" aria-label="quitar fila">×</button></td></tr>`;
+}
+
+/* ================================================== bindings editor */
+function bindEditor(){
+  const c = cfg.curves[selected];
+
+  $("#c-name").onchange = e=>{
+    const nn = e.target.value.trim();
+    if(!nn || nn===selected) return;
+    if(cfg.curves[nn]){ setStatus("Ya existe una curva con ese nombre","err"); e.target.value=selected; return; }
+    cfg.curves[nn]=c; delete cfg.curves[selected];
+    // actualiza referencias en otras curvas
+    Object.values(cfg.curves).forEach(cc=>{
+      ["discount","projection","other_leg"].forEach(f=>{ if(cc[f]===selected) cc[f]=nn; });
+      if(cc.depends_on) cc.depends_on = cc.depends_on.map(d=>d===selected?nn:d);
+    });
+    selected=nn; renderAll(); setStatus("Curva renombrada","ok");
+  };
+  $("#btn-del-curve").onclick = ()=>{
+    if(!confirm(`¿Eliminar la curva ${selected}?`)) return;
+    delete cfg.curves[selected];
+    selected = Object.keys(cfg.curves)[0]||null;
+    renderAll(); setStatus("Curva eliminada","ok");
+  };
+  $("#c-mode").onchange = e=> c.mode=e.target.value;
+  $("#c-disc").onchange = e=> c.discount=e.target.value;
+  $("#c-proj").onchange = e=> c.projection=e.target.value;
+  $("#c-other").onchange = e=>{ if(e.target.value) c.other_leg=e.target.value; else delete c.other_leg; };
+
+  $("#dep-add").onchange = e=>{
+    if(!e.target.value) return;
+    (c.depends_on = c.depends_on||[]).push(e.target.value);
+    renderAll();
+  };
+  document.querySelectorAll("[data-deldep]").forEach(b=>{
+    b.onclick=()=>{ c.depends_on=c.depends_on.filter(d=>d!==b.dataset.deldep); renderAll(); };
+  });
+
+  // convenciones
+  const syncConv = ()=>{
+    const rows = document.querySelectorAll(".conv-row"); const out={};
+    rows.forEach(r=>{
+      const k=r.querySelector(".conv-k").value.trim();
+      let v=r.querySelector(".conv-v").value.trim();
+      if(!k) return;
+      if(v.includes(",")) out[k]=v.split(",").map(s=>s.trim());
+      else if(v!=="" && !isNaN(v)) out[k]=parseFloat(v);
+      else out[k]=v;
+    });
+    c.conventions=out;
+  };
+  document.querySelectorAll(".conv-k,.conv-v").forEach(i=> i.onchange=syncConv);
+  document.querySelectorAll(".conv-del").forEach(b=> b.onclick=()=>{ b.parentElement.remove(); syncConv(); });
+  $("#btn-add-conv").onclick=()=>{
+    $("#conv-rows").insertAdjacentHTML("beforeend", convRow("",""));
+    bindEditor();
+  };
+
+  // instrumentos
+  const syncIns = ()=>{
+    const rows=document.querySelectorAll("#ins-body tr"); const out=[];
+    rows.forEach(r=>{
+      const ins={ type:r.querySelector(".ins-type").value,
+                  tenor:r.querySelector(".ins-tenor").value.trim(),
+                  quote:parseFloat(r.querySelector(".ins-quote").value)||0 };
+      const extra=r.querySelector(".ins-extra").value.trim();
+      if(extra) extra.split(",").forEach(pair=>{
+        const [k,...rest]=pair.split("="); const v=rest.join("=").trim();
+        if(k&&v!=="") ins[k.trim()] = (!isNaN(v)?parseFloat(v):v);
+      });
+      out.push(ins);
+    });
+    c.instruments=out;
+    document.querySelector(".card h3:last-of-type");
+  };
+  document.querySelectorAll(".ins-type,.ins-tenor,.ins-quote,.ins-extra")
+    .forEach(i=> i.onchange=syncIns);
+  document.querySelectorAll(".ins-del").forEach(b=> b.onclick=()=>{ b.closest("tr").remove(); syncIns(); });
+  $("#btn-add-ins").onclick=()=>{
+    (c.instruments=c.instruments||[]).push({type:"ois_swap",tenor:"1Y",quote:0.03});
+    renderEditor();
+  };
+}
+
+/* ================================================== top-level */
+function renderAll(){ renderRail(); renderEditor();
+  $("#valdate").value = String(cfg.valuation_date).slice(0,10);
+  setStatus(Object.keys(cfg.curves).length+" curvas cargadas");
+}
+
+$("#valdate").onchange = e=> cfg.valuation_date=e.target.value;
+
+$("#btn-add-curve").onclick = ()=>{
+  let n="NUEVA_CURVA", i=1; while(cfg.curves[n]) n="NUEVA_CURVA_"+(i++);
+  cfg.curves[n]={mode:"sequential",discount:"self",projection:"self",depends_on:[],
+    conventions:{calendar:"US","day_count":"ACT/360",spot_lag:2,fixed_freq:"A"},
+    instruments:[{type:"ois_swap",tenor:"1Y",quote:0.03}]};
+  selected=n; renderAll();
+};
+
+function toYaml(){
+  return jsyaml.dump(cfg,{lineWidth:110,noRefs:true,quotingType:'"'});
+}
+$("#btn-preview").onclick=()=>{ $("#yaml-out").textContent=toYaml(); $("#dlg").showModal(); };
+$("#btn-close").onclick=()=> $("#dlg").close();
+$("#btn-copy").onclick=async()=>{
+  await navigator.clipboard.writeText($("#yaml-out").textContent);
+  setStatus("YAML copiado al portapapeles","ok");
+};
+$("#btn-export").onclick=()=>{
+  const blob=new Blob([toYaml()],{type:"text/yaml"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="curves.yaml"; a.click();
+  URL.revokeObjectURL(a.href); setStatus("curves.yaml descargado","ok");
+};
+$("#btn-import").onclick=()=> $("#file-input").click();
+$("#file-input").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ try{
+      const parsed=jsyaml.load(rd.result);
+      if(!parsed.curves) throw new Error("El archivo no tiene la clave 'curves'");
+      cfg=parsed; selected=Object.keys(cfg.curves)[0]; renderAll();
+      setStatus("YAML importado: "+f.name,"ok");
+    }catch(err){ setStatus("Error al leer YAML: "+err.message,"err"); } };
+  rd.readAsText(f);
+};
+
+/* ============================================================== quotes */
+const QUOTE_PREFIX_MAP = {MM:"mm",DEPO:"mm",SWAP:"ois_swap",IRS:"ois_swap",
+  FRA:"fra",FUT:"future",FUTURE:"future",FX:"fx_forward",FWD:"fx_forward",
+  XCCY:"xccy_basis",BASIS:"xccy_basis"};
+
+function parseQuoteName(name){
+  const parts = name.trim().split(".");
+  const prefix = (parts[0]||"").toUpperCase();
+  let tenor=null, ccy=null, index=null;
+  if(prefix==="MM"||prefix==="DEPO"){
+    ccy=parts[1]; index=parts[2]; tenor=parts[3]||"ON";
+  } else { tenor=parts[1]; ccy=parts[2]; index=parts[3]; }
+  return {prefix, type:QUOTE_PREFIX_MAP[prefix], tenor, ccy, index, raw:name.trim()};
+}
+
+function normTenor(v){ if(v===true)return"ON"; if(v===false)return"OFF"; return String(v).toUpperCase().trim(); }
+
+function parseQuotesCSV(text, rateScale=0.01){
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) return [];
+  const headers = lines[0].split(",").map(h=>h.trim().toLowerCase());
+  const idx = k => headers.indexOf(k);
+  const iName = idx("quote name")>=0?idx("quote name"):(idx("quote_name")>=0?idx("quote_name"):idx("name"));
+  const iBid=idx("bid"), iMid=idx("mid"), iAsk=idx("ask");
+  const out=[];
+  for(let r=1;r<lines.length;r++){
+    const cells = lines[r].split(",");
+    const name = cells[iName]; if(!name) continue;
+    const num = i => { const v=(cells[i]||"").trim(); return v===""?null:parseFloat(v)*rateScale; };
+    let bid=num(iBid), mid=num(iMid), ask=num(iAsk);
+    if(mid==null) mid = bid!=null?bid:ask;
+    const p = parseQuoteName(name); p.bid=bid; p.mid=mid; p.ask=ask;
+    out.push(p);
+  }
+  return out;
+}
+
+function findCurveFor(rec){
+  const names = Object.keys(cfg.curves);
+  for(const n of names){ const up=n.toUpperCase();
+    if(rec.ccy&&rec.index&&up.includes(rec.ccy)&&up.includes(rec.index)) return n; }
+  for(const n of names){ if(rec.index&&n.toUpperCase().includes(rec.index)) return n; }
+  return null;
+}
+
+function applyQuotes(text){
+  const recs = parseQuotesCSV(text);
+  let matched=0; const notes=[];
+  for(const rec of recs){
+    const cname = findCurveFor(rec);
+    if(!cname){ notes.push("· sin curva destino: "+rec.raw); continue; }
+    const insts = cfg.curves[cname].instruments||[];
+    const target = insts.find(i=>normTenor(i.tenor)===normTenor(rec.tenor));
+    if(!target){ notes.push(`· ${rec.raw} (tenor ${rec.tenor}) sin instrumento en ${cname}`); continue; }
+    target.quote = {bid:rec.bid, mid:rec.mid, ask:rec.ask};
+    matched++;
+  }
+  return {matched, total:recs.length, notes};
+}
+
+$("#btn-quotes").onclick = ()=> $("#dlg-quotes").showModal();
+$("#btn-quotes-close").onclick = ()=> $("#dlg-quotes").close();
+$("#btn-quotes-file").onclick = ()=> $("#quotes-input").click();
+$("#quotes-input").onchange = e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ $("#quotes-text").value=rd.result; };
+  rd.readAsText(f);
+};
+$("#btn-quotes-apply").onclick = ()=>{
+  const text = $("#quotes-text").value.trim();
+  if(!text){ $("#quotes-status").textContent="Pega o carga un CSV primero"; $("#quotes-status").className="status err"; return; }
+  try{
+    const res = applyQuotes(text);
+    $("#quotes-status").textContent = `${res.matched}/${res.total} emparejados`;
+    $("#quotes-status").className = "status ok";
+    $("#quotes-report").innerHTML = res.notes.length
+      ? "<b>Sin emparejar:</b><br>"+res.notes.join("<br>")
+      : "Todos los quotes se aplicaron correctamente.";
+    renderAll();
+    setStatus(`Quotes aplicados: ${res.matched}/${res.total}`,"ok");
+  }catch(err){
+    $("#quotes-status").textContent="Error: "+err.message;
+    $("#quotes-status").className="status err";
+  }
+};
+
+/* ============================================================== servidor */
+let lastResults = null;   // {order, tables, errors, valuation_date}
+
+// El servidor inyecta window.SERVER_MODE=true; en modo archivo local queda undefined.
+if (window.SERVER_MODE) {
+  $("#btn-build").style.display = "";
+}
+
+async function buildOnServer(){
+  if(!window.SERVER_MODE){
+    setStatus("El botón Construir requiere el servidor (python server.py)","err");
+    return;
+  }
+  const btn = $("#btn-build");
+  btn.disabled = true; btn.textContent = "Construyendo…";
+  setStatus("Enviando al motor de bootstrapping…");
+  try{
+    const resp = await fetch("/build", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({config: cfg, zero_day_count:"ACT/360"})
+    });
+    const data = await resp.json();
+    if(!data.ok){
+      setStatus("Error de construcción: "+(data.error||"desconocido"),"err");
+      console.error(data.trace);
+      return;
+    }
+    lastResults = data;
+    const nCurves = data.order.length;
+    const nErr = Object.keys(data.errors).length;
+    setStatus(`Construidas ${nCurves-nErr}/${nCurves} curvas × 3 lados`, nErr?"":"ok");
+    openResults();
+  }catch(err){
+    setStatus("No se pudo contactar el servidor: "+err.message,"err");
+  }finally{
+    btn.disabled = false; btn.textContent = "▶ Construir curvas";
+  }
+}
+
+function openResults(){
+  if(!lastResults) return;
+  const sel = $("#res-curve");
+  // por defecto muestra la curva seleccionada si tiene tabla, sino la primera
+  const withTable = lastResults.order.filter(n=>lastResults.tables[n]);
+  sel.innerHTML = lastResults.order.map(n=>{
+    const err = lastResults.errors[n];
+    return `<option value="${n}" ${err?'disabled':''}>${n}${err?' (error)':''}</option>`;
+  }).join("");
+  const initial = lastResults.tables[selected] ? selected : withTable[0];
+  if(initial) sel.value = initial;
+  renderResultTable(initial);
+  $("#dlg-results").showModal();
+}
+
+function renderResultTable(name){
+  const rows = lastResults.tables[name];
+  const summary = $("#res-summary");
+  if(!rows){
+    summary.innerHTML = `<span style="color:var(--red)">${name}: ${lastResults.errors[name]||'sin tabla'}</span>`;
+    $("#res-body").innerHTML = "";
+    return;
+  }
+  summary.innerHTML = `<b style="color:var(--amber)">${name}</b> · `+
+    `valuación ${lastResults.valuation_date} · ${rows.length} pilares · `+
+    `Zero en ACT/360 anual compuesto`;
+  $("#res-body").innerHTML = rows.map(r=>`
+    <tr>
+      <td>${r.date}</td>
+      <td style="text-align:right">${r.offset}</td>
+      <td style="text-align:right">${r.zero_bid.toFixed(5)}</td>
+      <td style="text-align:right;color:var(--amber)">${r.zero_mid.toFixed(5)}</td>
+      <td style="text-align:right">${r.zero_ask.toFixed(5)}</td>
+      <td style="text-align:right">${r.df_bid.toFixed(6)}</td>
+      <td style="text-align:right;color:var(--amber)">${r.df_mid.toFixed(6)}</td>
+      <td style="text-align:right">${r.df_ask.toFixed(6)}</td>
+    </tr>`).join("");
+}
+
+$("#btn-build").onclick = buildOnServer;
+$("#res-curve").onchange = e=> renderResultTable(e.target.value);
+$("#btn-res-close").onclick = ()=> $("#dlg-results").close();
+$("#btn-res-csv").onclick = async ()=>{
+  const name = $("#res-curve").value;
+  const resp = await fetch("/export-csv", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({config: cfg, name, zero_day_count:"ACT/360"})
+  });
+  const text = await resp.text();
+  const blob = new Blob([text], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name+".csv"; a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+loadDefault();
+</script>
+</body>
+</html>

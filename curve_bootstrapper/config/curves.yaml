@@ -1,0 +1,616 @@
+# =============================================================================
+# curves.yaml — Configuración de las 28 curvas del sistema
+# =============================================================================
+# ¡IMPORTANTE!  Todos los quotes son DATOS DE EJEMPLO (niveles plausibles pero
+# ficticios) para que el sistema corra end-to-end. Reemplázalos con tu data
+# de mercado real.
+#
+# Unidades:
+#   - Tasas y basis:  DECIMAL       (3.70% -> 0.0370 ;  -15 bp -> -0.0015)
+#   - Puntos forward: PUNTOS        (se dividen por points_factor)
+#   - FX spots:       outright
+#
+# Campos por curva:
+#   mode:        sequential | global
+#   discount:    self | <nombre de curva>     (semántica de descuento)
+#   projection:  self | <nombre de curva>     (curva de proyección de forwards)
+#   other_leg:   <curva de la otra moneda>    (solo para fx_forward)
+#   depends_on:  [curvas que deben construirse antes]
+#   conventions: calendar, day_count, spot_lag, fixed_freq, float_freq,
+#                fx_pair, solve_for, points_factor, ...
+#
+# Convenciones adicionales (opcionales; si se omiten usan el default que ya
+# tenían las 27 curvas originales, documentado a la derecha de cada una):
+#   business_day_convention: MF|F|P|NONE     (default MF)
+#   end_of_month:            bool             (default false)
+#   short_end_payment_style: periodic|bullet  (default: bullet en ois_swap,
+#                                               periodic en el resto)
+#   rate_cutoff_days:        int              (default 0, solo ois_swap)
+#   pay_delay_days:          int              (default 0, ambas patas)
+#   reset_position:          in_arrears|in_advance  (solo VALIDA contra el
+#                                               'type'; no cambia pricing)
+#   accrual_convention:      excl_spread|incl_spread (default excl_spread,
+#                                               solo xccy_basis/tenor_basis)
+# =============================================================================
+
+valuation_date: 2026-07-02
+
+market_data:
+  fx_spots:
+    USDPEN: 3.5500
+    USDCOP: 4100.00
+    USDCLP: 930.00
+    USDBRL: 5.4000
+    USDMXN: 18.500
+    USDJPY: 150.00
+    USDCHF: 0.8800
+    USDCAD: 1.3600
+    USDSEK: 10.500
+    USDCNH: 7.2000
+    EURUSD: 1.0900
+    GBPUSD: 1.2700
+
+curves:
+
+  # ===========================================================================
+  # NIVEL 0 — Curvas autónomas self-discounting (RFR OIS + TIIE doméstica)
+  # ===========================================================================
+
+  USD_SOFR:
+    # Pilares y quotes bid/mid/ask tomados de la pantalla de mercado.
+    # El pilar corto es un depósito MM overnight; el resto son OIS swaps.
+    # Formato de quote por lado: {bid, mid, ask}. (Si cargas la hoja de
+    # quotes vía quotes_loader, estos valores se sobreescriben.)
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: US, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: mm,       tenor: "ON", quote: {bid: 0.0366000, mid: 0.0366000, ask: 0.0366000}}
+      - {type: ois_swap, tenor: 1M,  quote: {bid: 0.0365491, mid: 0.0365950, ask: 0.0366409}}
+      - {type: ois_swap, tenor: 2M,  quote: {bid: 0.0368304, mid: 0.0368811, ask: 0.0369317}}
+      - {type: ois_swap, tenor: 3M,  quote: {bid: 0.0371592, mid: 0.0372150, ask: 0.0372708}}
+      - {type: ois_swap, tenor: 6M,  quote: {bid: 0.0382421, mid: 0.0382790, ask: 0.0383159}}
+      - {type: ois_swap, tenor: 9M,  quote: {bid: 0.0390253, mid: 0.0391000, ask: 0.0391747}}
+      - {type: ois_swap, tenor: 1Y,  quote: {bid: 0.0397271, mid: 0.0397500, ask: 0.0397729}}
+      - {type: ois_swap, tenor: 18M, quote: {bid: 0.0397978, mid: 0.0398350, ask: 0.0398722}}
+      - {type: ois_swap, tenor: 2Y,  quote: {bid: 0.0398595, mid: 0.0398825, ask: 0.0399055}}
+      - {type: ois_swap, tenor: 3Y,  quote: {bid: 0.0395206, mid: 0.0395449, ask: 0.0395693}}
+      - {type: ois_swap, tenor: 4Y,  quote: {bid: 0.0393444, mid: 0.0393614, ask: 0.0393783}}
+      - {type: ois_swap, tenor: 5Y,  quote: {bid: 0.0393579, mid: 0.0393925, ask: 0.0394271}}
+      - {type: ois_swap, tenor: 6Y,  quote: {bid: 0.0395291, mid: 0.0395515, ask: 0.0395739}}
+      - {type: ois_swap, tenor: 7Y,  quote: {bid: 0.0397599, mid: 0.0397775, ask: 0.0397951}}
+      - {type: ois_swap, tenor: 8Y,  quote: {bid: 0.0400077, mid: 0.0400310, ask: 0.0400543}}
+      - {type: ois_swap, tenor: 9Y,  quote: {bid: 0.0403002, mid: 0.0403230, ask: 0.0403458}}
+      - {type: ois_swap, tenor: 10Y, quote: {bid: 0.0406142, mid: 0.0406375, ask: 0.0406608}}
+      - {type: ois_swap, tenor: 12Y, quote: {bid: 0.0412462, mid: 0.0412692, ask: 0.0412921}}
+      - {type: ois_swap, tenor: 15Y, quote: {bid: 0.0420807, mid: 0.0421091, ask: 0.0421374}}
+      - {type: ois_swap, tenor: 20Y, quote: {bid: 0.0427755, mid: 0.0428047, ask: 0.0428338}}
+      - {type: ois_swap, tenor: 25Y, quote: {bid: 0.0427266, mid: 0.0427547, ask: 0.0427827}}
+      - {type: ois_swap, tenor: 30Y, quote: {bid: 0.0423361, mid: 0.0423665, ask: 0.0423969}}
+
+  EUR_ESTR:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: TARGET, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0200}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0201}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0202}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0205}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0210}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0225}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0245}
+      - {type: ois_swap, tenor: 20Y, quote: 0.0255}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0250}
+
+  GBP_SONIA:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: UK, day_count: ACT/365, spot_lag: 0, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0390}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0391}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0390}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0385}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0375}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0365}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0370}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0375}
+
+  CHF_SARON:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CH, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0030}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0031}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0032}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0035}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0042}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0060}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0085}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0095}
+
+  JPY_TONAR:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: JP, day_count: ACT/365, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0070}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0072}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0075}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0080}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0092}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0120}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0155}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0210}
+
+  CAD_CORRA:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CA, day_count: ACT/365, spot_lag: 1, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 1M,  quote: 0.0280}
+      - {type: ois_swap, tenor: 3M,  quote: 0.0281}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0280}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0278}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0275}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0280}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0295}
+      - {type: ois_swap, tenor: 30Y, quote: 0.0310}
+
+  MXN_TIIE_28D:
+    # Curva de proyección TIIE 28d DESCONTADA CONSIGO MISMA (self-discounted).
+    # Periodicidad EXACTA de 4 semanas (28 días) en ambas patas, confirmada
+    # por pantalla ("Freq: LUN" en fixed y float) — no es un mes calendario.
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: MX, day_count: ACT/360, spot_lag: 1,
+                  fixed_freq: 4W, float_freq: 4W}
+    instruments:
+      - {type: ibor_swap, tenor: 3M,  quote: 0.0800}
+      - {type: ibor_swap, tenor: 6M,  quote: 0.0795}
+      - {type: ibor_swap, tenor: 1Y,  quote: 0.0785}
+      - {type: ibor_swap, tenor: 2Y,  quote: 0.0770}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0755}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0760}
+
+  MXN_F_TIIE:
+    # OIS sobre F-TIIE (referencia RFR-style que reemplaza al panel IBOR
+    # TIIE 28D tradicional). Self-discounting. Convenciones tomadas de
+    # pantalla Bloomberg para el swap MXN 28D vs F-TIIE.
+    # spot_lag=2 (Settlement: T+2 Days en Bloomberg) -- distinto del T+1
+    # de MXN_TIIE_28D, no copiar ese default.
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions:
+      calendar: MX
+      day_count: ACT/360
+      spot_lag: 2
+      fixed_freq: 4W
+      business_day_convention: F
+      end_of_month: true
+      short_end_payment_style: periodic
+      rate_cutoff_days: 1
+      pay_delay_days: 2
+      reset_position: in_arrears
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0800}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0795}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0785}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0770}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0755}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0760}
+
+  # ===========================================================================
+  # NIVEL 1 — Curvas que dependen de su RFR / domésticas
+  # ===========================================================================
+
+  USD_FEDFUNDS:
+    # Construcción secuencial vía basis Fed Funds vs SOFR.
+    # Incógnita: proyección EFFR. Descuento: USD_SOFR.
+    # quote = spread s de la pata FF tal que FF+s = SOFR (en PV).
+    mode: sequential
+    discount: USD_SOFR
+    projection: USD_SOFR          # pata base contra la que se mide el basis
+    depends_on: [USD_SOFR]
+    conventions: {calendar: US, day_count: ACT/360, spot_lag: 2, float_freq: Q}
+    instruments:
+      - {type: tenor_basis, tenor: 3M,  quote: -0.00050}
+      - {type: tenor_basis, tenor: 6M,  quote: -0.00050}
+      - {type: tenor_basis, tenor: 1Y,  quote: -0.00048}
+      - {type: tenor_basis, tenor: 2Y,  quote: -0.00045}
+      - {type: tenor_basis, tenor: 5Y,  quote: -0.00040}
+      - {type: tenor_basis, tenor: 10Y, quote: -0.00035}
+
+  EURIBOR_3M:
+    # Parte corta: futuros STIR ICE 3M EURIBOR (tiras trimestrales
+    # consecutivas). Parte larga: swaps desde 3Y. Día 30E/360 en la pata
+    # fija confirmado en pantalla (no ACT/360 como en las OIS).
+    mode: sequential
+    discount: EUR_ESTR
+    projection: self
+    depends_on: [EUR_ESTR]
+    conventions: {calendar: TARGET, day_count: 30E/360, float_day_count: ACT/360,
+                  spot_lag: 2, fixed_freq: A, float_freq: Q}
+    instruments:
+      - {type: future, tenor: 3Mx6M,   quote: 97.85, quote_convention: price}
+      - {type: future, tenor: 6Mx9M,   quote: 97.75, quote_convention: price}
+      - {type: future, tenor: 9Mx12M,  quote: 97.68, quote_convention: price}
+      - {type: future, tenor: 12Mx15M, quote: 97.65, quote_convention: price}
+      - {type: future, tenor: 15Mx18M, quote: 97.62, quote_convention: price}
+      - {type: future, tenor: 18Mx21M, quote: 97.60, quote_convention: price}
+      - {type: future, tenor: 21Mx24M, quote: 97.58, quote_convention: price, convexity_bp: 0.5}
+      - {type: ibor_swap, tenor: 3Y,  quote: 0.0224}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0235}
+      - {type: ibor_swap, tenor: 7Y,  quote: 0.0244}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0255}
+      - {type: ibor_swap, tenor: 20Y, quote: 0.0265}
+      - {type: ibor_swap, tenor: 30Y, quote: 0.0260}
+
+  EURIBOR_6M:
+    # Parte corta: FRAs (notación 'start x end', p.ej. 1Mx7M = FRA a 1M que
+    # fija una tasa 6M). Parte larga: swaps desde 2Y. 30E/360 en pata fija.
+    mode: sequential
+    discount: EUR_ESTR
+    projection: self
+    depends_on: [EUR_ESTR]
+    conventions: {calendar: TARGET, day_count: 30E/360, float_day_count: ACT/360,
+                  spot_lag: 2, fixed_freq: A, float_freq: S}
+    instruments:
+      - {type: fra, tenor: 1Mx7M,  quote: 0.0216}
+      - {type: fra, tenor: 2Mx8M,  quote: 0.0218}
+      - {type: fra, tenor: 3Mx9M,  quote: 0.0219}
+      - {type: fra, tenor: 4Mx10M, quote: 0.0220}
+      - {type: fra, tenor: 5Mx11M, quote: 0.0221}
+      - {type: fra, tenor: 6Mx12M, quote: 0.0222}
+      - {type: ibor_swap, tenor: 2Y,  quote: 0.0227}
+      - {type: ibor_swap, tenor: 3Y,  quote: 0.0233}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0242}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0262}
+      - {type: ibor_swap, tenor: 20Y, quote: 0.0272}
+      - {type: ibor_swap, tenor: 30Y, quote: 0.0267}
+
+  SEK_STIBOR_3M:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: SE, day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: A, float_freq: Q}
+    instruments:
+      - {type: ibor_swap, tenor: 6M,  quote: 0.0222}
+      - {type: ibor_swap, tenor: 1Y,  quote: 0.0225}
+      - {type: ibor_swap, tenor: 2Y,  quote: 0.0230}
+      - {type: ibor_swap, tenor: 5Y,  quote: 0.0245}
+      - {type: ibor_swap, tenor: 10Y, quote: 0.0262}
+      - {type: ibor_swap, tenor: 20Y, quote: 0.0270}
+
+  PEN_OIS_TIBO:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: PE, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0430}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0432}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0435}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0445}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0470}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0500}
+
+  COP_OIS_IBR:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CO, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0850}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0845}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0830}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0805}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0780}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0790}
+      - {type: ois_swap, tenor: 15Y, quote: 0.0800}
+
+  CLP_CAMARA:
+    mode: sequential
+    discount: self
+    projection: self
+    depends_on: []
+    conventions: {calendar: CL, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: ois_swap, tenor: 3M,  quote: 0.0480}
+      - {type: ois_swap, tenor: 6M,  quote: 0.0478}
+      - {type: ois_swap, tenor: 1Y,  quote: 0.0472}
+      - {type: ois_swap, tenor: 2Y,  quote: 0.0465}
+      - {type: ois_swap, tenor: 5Y,  quote: 0.0460}
+      - {type: ois_swap, tenor: 10Y, quote: 0.0470}
+      - {type: ois_swap, tenor: 20Y, quote: 0.0480}
+
+  # ===========================================================================
+  # NIVEL 2 — Cross-currency (colateral USD SOFR)
+  #   Parte corta: fx_forward (puntos fwd) | Parte larga: XCCY
+  #   LatAm: xccy_fixed_float (NDS fija local vs USD SOFR)
+  #   G10:   xccy_basis (flotante RFR local + basis vs USD SOFR)
+  # ===========================================================================
+
+  PEN_X_SOFR:
+    mode: sequential
+    discount: self                 # esta ES la curva de descuento PEN coll. USD
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, PE], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDPEN, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 24}
+      - {type: fx_forward, tenor: 3M, quote: 71}
+      - {type: fx_forward, tenor: 6M, quote: 142}
+      - {type: fx_forward, tenor: 1Y, quote: 288}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0455}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0462}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0478}
+      - {type: xccy_fixed_float, tenor: 7Y,  quote: 0.0492}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0510}
+
+  COP_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, CO], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDCOP, solve_for: quote_ccy,
+                  points_factor: 1}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 18}
+      - {type: fx_forward, tenor: 3M, quote: 54}
+      - {type: fx_forward, tenor: 6M, quote: 110}
+      - {type: fx_forward, tenor: 1Y, quote: 225}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0815}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0800}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0790}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0805}
+
+  CLP_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, CL], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDCLP, solve_for: quote_ccy,
+                  points_factor: 1}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 0.85}
+      - {type: fx_forward, tenor: 3M, quote: 2.60}
+      - {type: fx_forward, tenor: 6M, quote: 5.20}
+      - {type: fx_forward, tenor: 1Y, quote: 10.50}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0472}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0468}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0466}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0478}
+
+  BRL_X_SOFR:
+    # Parte corta con puntos NDF, parte larga con XCCY (fija BRL vs SOFR).
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, BR], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDBRL, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 328}
+      - {type: fx_forward, tenor: 3M, quote: 990}
+      - {type: fx_forward, tenor: 6M, quote: 2010}
+      - {type: fx_forward, tenor: 1Y, quote: 4120}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.1080}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.1065}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.1050}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.1060}
+
+  MXN_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, MX], day_count: ACT/360, spot_lag: 2,
+                  fixed_freq: S, fx_pair: USDMXN, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 663}
+      - {type: fx_forward, tenor: 3M, quote: 2000}
+      - {type: fx_forward, tenor: 6M, quote: 4050}
+      - {type: fx_forward, tenor: 1Y, quote: 8300}
+      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0775}
+      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0765}
+      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0758}
+      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0768}
+
+  EUR_X_USD:
+    mode: sequential
+    discount: self
+    projection: EUR_ESTR           # forwards de la pata flotante EUR
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, EUR_ESTR]
+    conventions: {calendar: [US, TARGET], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: EURUSD, solve_for: base_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 15.4}
+      - {type: fx_forward, tenor: 3M, quote: 46}
+      - {type: fx_forward, tenor: 6M, quote: 93}
+      - {type: fx_forward, tenor: 1Y, quote: 188}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0012}
+      - {type: xccy_basis, tenor: 3Y,  quote: -0.0013}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0015}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0018}
+      - {type: xccy_basis, tenor: 20Y, quote: -0.0020}
+
+  JPY_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: JPY_TONAR
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, JPY_TONAR]
+    conventions: {calendar: [US, JP], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: USDJPY, solve_for: quote_ccy,
+                  points_factor: 100}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -37.5}
+      - {type: fx_forward, tenor: 3M, quote: -112}
+      - {type: fx_forward, tenor: 6M, quote: -225}
+      - {type: fx_forward, tenor: 1Y, quote: -455}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0028}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0035}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0040}
+      - {type: xccy_basis, tenor: 20Y, quote: -0.0042}
+
+  CHF_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: CHF_SARON
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, CHF_SARON]
+    conventions: {calendar: [US, CH], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: USDCHF, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -25}
+      - {type: fx_forward, tenor: 3M, quote: -75}
+      - {type: fx_forward, tenor: 6M, quote: -150}
+      - {type: fx_forward, tenor: 1Y, quote: -300}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0010}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0013}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0016}
+
+  GBP_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: GBP_SONIA
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, GBP_SONIA]
+    conventions: {calendar: [US, UK], day_count: ACT/365, spot_lag: 0,
+                  float_freq: Q, fx_pair: GBPUSD, solve_for: base_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -2.1}
+      - {type: fx_forward, tenor: 3M, quote: -6.4}
+      - {type: fx_forward, tenor: 6M, quote: -12.7}
+      - {type: fx_forward, tenor: 1Y, quote: -25.6}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0003}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0005}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0007}
+
+  CAD_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: CAD_CORRA
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, CAD_CORRA]
+    conventions: {calendar: [US, CA], day_count: ACT/365, spot_lag: 1,
+                  float_freq: Q, fx_pair: USDCAD, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -10}
+      - {type: fx_forward, tenor: 3M, quote: -31}
+      - {type: fx_forward, tenor: 6M, quote: -61}
+      - {type: fx_forward, tenor: 1Y, quote: -123}
+      - {type: xccy_basis, tenor: 2Y,  quote: 0.0004}
+      - {type: xccy_basis, tenor: 5Y,  quote: 0.0005}
+      - {type: xccy_basis, tenor: 10Y, quote: 0.0006}
+
+  SEK_X_SOFR:
+    mode: sequential
+    discount: self
+    projection: SEK_STIBOR_3M      # basis cotizado contra STIBOR 3M
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, SEK_STIBOR_3M]
+    conventions: {calendar: [US, SE], day_count: ACT/360, spot_lag: 2,
+                  float_freq: Q, fx_pair: USDSEK, solve_for: quote_ccy,
+                  points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -131}
+      - {type: fx_forward, tenor: 3M, quote: -394}
+      - {type: fx_forward, tenor: 6M, quote: -788}
+      - {type: fx_forward, tenor: 1Y, quote: -1590}
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0016}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0020}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0024}
+
+  CNH_OFFSHORE:
+    # Curva CNH implícita PURAMENTE offshore: solo puntos forward USD/CNH.
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR]
+    conventions: {calendar: [US, CN], day_count: ACT/360, spot_lag: 2,
+                  fx_pair: USDCNH, solve_for: quote_ccy, points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: -102}
+      - {type: fx_forward, tenor: 3M, quote: -306}
+      - {type: fx_forward, tenor: 6M, quote: -612}
+      - {type: fx_forward, tenor: 9M, quote: -920}
+      - {type: fx_forward, tenor: 1Y, quote: -1230}
+      - {type: fx_forward, tenor: 2Y, quote: -2400}
+
+  # ===========================================================================
+  # NIVEL 3 — Implícitas / derivadas
+  # ===========================================================================
+
+  USD_IMPL_TIBO:
+    # USD implícita: incógnita = DF USD, dado FX fwd USD/PEN y la curva
+    # doméstica PEN TIBO. Misma data FX que PEN_X_SOFR, distinta incógnita.
+    mode: sequential
+    discount: self
+    projection: self
+    other_leg: PEN_OIS_TIBO        # la pata conocida ahora es la PEN doméstica
+    depends_on: [PEN_OIS_TIBO]
+    conventions: {calendar: [US, PE], day_count: ACT/360, spot_lag: 2,
+                  fx_pair: USDPEN, solve_for: base_ccy, points_factor: 10000}
+    instruments:
+      - {type: fx_forward, tenor: 1M, quote: 24}
+      - {type: fx_forward, tenor: 3M, quote: 71}
+      - {type: fx_forward, tenor: 6M, quote: 142}
+      - {type: fx_forward, tenor: 1Y, quote: 288}
+      - {type: fx_forward, tenor: 2Y, quote: 590}
+
+  UVR_IBR:
+    # Curva de DESCUENTO de flujos UVR, construida secuencialmente a partir
+    # de swaps UVR vs IBR, después de tener COP_OIS_IBR (dependencia).
+    # quote = tasa fija real (UVR) del swap.
+    mode: sequential
+    discount: self
+    projection: COP_OIS_IBR
+    depends_on: [COP_OIS_IBR]
+    conventions: {calendar: CO, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
+    instruments:
+      - {type: uvr_swap, tenor: 1Y,  quote: 0.0420}
+      - {type: uvr_swap, tenor: 2Y,  quote: 0.0415}
+      - {type: uvr_swap, tenor: 5Y,  quote: 0.0405}
+      - {type: uvr_swap, tenor: 10Y, quote: 0.0400}
+      - {type: uvr_swap, tenor: 15Y, quote: 0.0398}
