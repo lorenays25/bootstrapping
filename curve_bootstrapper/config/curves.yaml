@@ -251,12 +251,20 @@ curves:
       pay_delay_days: 2
       reset_position: in_arrears
     instruments:
-      - {type: ois_swap, tenor: 3M,  quote: 0.0800}
-      - {type: ois_swap, tenor: 6M,  quote: 0.0795}
-      - {type: ois_swap, tenor: 1Y,  quote: 0.0785}
-      - {type: ois_swap, tenor: 2Y,  quote: 0.0770}
-      - {type: ois_swap, tenor: 5Y,  quote: 0.0755}
-      - {type: ois_swap, tenor: 10Y, quote: 0.0760}
+      - {type: mm, tenor: "ON", quote: 0.0649, conventions: {reset_position: in_advance}}
+      - {type: ois_swap, tenor: 3M,   quote: 0.0653}
+      - {type: ois_swap, tenor: 6M,   quote: 0.0657}
+      - {type: ois_swap, tenor: 9M,   quote: 0.06615}
+      - {type: ois_swap, tenor: 13M,  quote: 0.0670}
+      - {type: ois_swap, tenor: 26M,  quote: 0.070550}
+      - {type: ois_swap, tenor: 39M,  quote: 0.073350}
+      - {type: ois_swap, tenor: 52M,  quote: 0.07555}
+      - {type: ois_swap, tenor: 65M,  quote: 0.07707}
+      - {type: ois_swap, tenor: 91M,  quote: 0.0796}
+      - {type: ois_swap, tenor: 130M, quote: 0.0823}
+      - {type: ois_swap, tenor: 195M, quote: 0.0850}
+      - {type: ois_swap, tenor: 260M, quote: 0.0858}
+      - {type: ois_swap, tenor: 390M, quote: 0.0855}
 
   # ===========================================================================
   # NIVEL 1 — Curvas que dependen de su RFR / domésticas

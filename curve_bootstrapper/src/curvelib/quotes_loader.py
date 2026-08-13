@@ -141,7 +141,14 @@ def parse_quotes_csv(text: str, rate_scale: float = 0.01) -> List[dict]:
     """Lee el CSV de quotes y devuelve una lista de registros:
     [{name, prefix, type, tenor, ccy, index, bid, mid, ask}]."""
     rows: List[dict] = []
-    reader = csv.DictReader(io.StringIO(text))
+    # el delimitador varía según la fuente (',' o ';'); se detecta por la
+    # primera línea en vez de asumir coma, para no depender de cómo cada
+    # banco/proveedor exporte la hoja.
+    try:
+        dialect = csv.Sniffer().sniff(text.splitlines()[0] if text else "", delimiters=",;")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
     # normaliza encabezados a minúsculas sin espacios
     field_map = {h: h.strip().lower() for h in (reader.fieldnames or [])}
     for raw in reader:
@@ -234,11 +241,16 @@ def apply_quotes_sheet(
             # tokeniza el nombre de curva: PEN_OIS_TIBO -> {PEN, OIS, TIBO}
             return set(cname.upper().replace("-", "_").split("_"))
 
+        def idx_tokens(s):
+            # normaliza igual que tokens(): separa por "_" y por "-"
+            return set((s or "").upper().replace("-", "_").split("_"))
+
         if ccy and idx and not has_mat:
-            # swap / MM: ambos tokens deben aparecer
+            # swap / MM: ccy exacto + idx como SUBCONJUNTO de tokens de la curva
+            idx_t = idx_tokens(idx)
             for cname in config["curves"]:
                 t = tokens(cname)
-                if ccy in t and idx in t:
+                if ccy in t and idx_t.issubset(t):
                     return cname
 
         if ccy and (has_mat or not idx):
@@ -248,9 +260,10 @@ def apply_quotes_sheet(
                     return cname
 
         if idx and not has_mat:
-            # fallback: solo índice como token exacto
+            # fallback: idx como subconjunto (antes: idx in t, igualdad exacta)
+            idx_t = idx_tokens(idx)
             for cname in config["curves"]:
-                if idx in tokens(cname):
+                if idx_t.issubset(tokens(cname)):
                     return cname
 
         # 3) comodín None
