@@ -51,6 +51,7 @@ _DC_FACTORY = {
     "30/360": lambda: ql.Thirty360(ql.Thirty360.BondBasis),      # US Bond Basis
     "30E/360": lambda: ql.Thirty360(ql.Thirty360.European),      # Eurobond Basis (pata fija EUR)
     "ACT/ACT": lambda: ql.ActualActual(ql.ActualActual.ISDA),
+    "ACT/ACT_ISMA": lambda: ql.ActualActual(ql.ActualActual.ISMA),  # corrido de bonos
 }
 
 _BDC = {
@@ -160,6 +161,14 @@ def add_tenor(
     unit = unit_map[t[-1]]
     n = int(t[:-1])
     return from_ql(cal.advance(to_ql(d), n, unit, _BDC[convention], end_of_month))
+
+
+def add_months(d: _dt.date, n: int) -> _dt.date:
+    """Suma n meses calendario (n negativo => resta). SIN ajuste de día hábil.
+    Se usa para generar el schedule de cupones de un bono retrocediendo desde
+    el vencimiento (p.ej. 12-Feb / 12-Ago). Las fechas de devengo son las no
+    ajustadas; el ajuste a día hábil se aplica solo a la fecha de pago."""
+    return from_ql(to_ql(d) + ql.Period(n, ql.Months))
 
 
 def spot_date(valuation_date: _dt.date, spot_lag: int, calendar_codes) -> _dt.date:

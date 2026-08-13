@@ -31,10 +31,11 @@ import yaml
 from fastapi import FastAPI, Body
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from curvelib.orchestrator import (load_config, build_bid_mid_ask,
+from curvelib.orchestrator import (load_config, build_bid_mid_ask, convention_report,
                                    topological_order)
 from curvelib.quotes_loader import apply_quotes_sheet
-from curvelib.instruments import CONVENTION_SCHEMA
+from curvelib.instruments import (CONVENTION_SCHEMA, INSTRUMENT_TYPES,
+                                  REQUIRED_BY_TYPE, conventions_for_type)
 
 HERE = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(HERE, "config", "curves.yaml")
@@ -54,23 +55,73 @@ def index():
     return HTMLResponse(html)
 
 
+def _jsonable(obj):
+    """Convierte fechas a ISO recursivamente.
+
+    El YAML parsea como `date` cualquier valor con forma de fecha, no solo
+    `valuation_date`: también el `maturity` de cada bono. JSONResponse no
+    serializa `date`, así que sin esto /config devuelve 500 y la UI cae al
+    respaldo embebido."""
+    if isinstance(obj, (_dt.date, _dt.datetime)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    return obj
+
+
 @app.get("/config")
 def get_config():
     """Devuelve la configuración por defecto (YAML -> JSON)."""
     cfg = load_config(CONFIG_PATH)
-    # el YAML parsea valuation_date como date; JSON necesita string
-    if isinstance(cfg.get("valuation_date"), (_dt.date, _dt.datetime)):
-        cfg["valuation_date"] = cfg["valuation_date"].isoformat()
-    return JSONResponse(cfg)
+    return JSONResponse(_jsonable(cfg))
 
 
 @app.get("/schema")
 def get_schema():
-    """Catálogo de convenciones de curva válidas (nombre, tipo, valores
-    permitidos) -- consumido por el selector "+ Convención" de la UI para
-    no hardcodear nombres/valores en el HTML. Mismo principio que /config:
-    si el motor agrega una convención nueva, este endpoint la refleja sola."""
+    """Catálogo de convenciones válidas (nombre, tipo, valores permitidos,
+    y a qué tipos de instrumento aplica cada una) -- consumido por el
+    selector "+ Convención" de la UI para no hardcodear nombres/valores en
+    el HTML. Mismo principio que /config: si el motor agrega una convención
+    nueva, este endpoint la refleja solo. Cada campo declara además
+    `applies_to`: los tipos de instrumento a los que aplica (ver
+    /schema/types para el mapa inverso)."""
     return JSONResponse(CONVENTION_SCHEMA)
+
+
+@app.get("/schema/types")
+def get_schema_types():
+    """Qué convenciones aplican a cada tipo de instrumento, y cuáles son
+    obligatorias. Va en un endpoint aparte de /schema para no cambiar la
+    forma (dict plano) que ya consume el parametrizador.
+
+    Con esto la UI ofrece, en CADA instrumento, solo las convenciones que
+    ese instrumento usa: un bono no debe mostrar rate_cutoff_days, ni un
+    OIS mostrar coupon_freq."""
+    return JSONResponse({
+        "instrument_types": sorted(INSTRUMENT_TYPES),
+        "by_type": {t: sorted(conventions_for_type(t)) for t in INSTRUMENT_TYPES},
+        "required_by_type": {t: list(v) for t, v in REQUIRED_BY_TYPE.items()},
+    })
+
+
+@app.post("/conventions")
+def get_conventions(payload: dict = Body(...)):
+    """Convención EFECTIVA de cada instrumento de cada curva, con la
+    procedencia de cada campo (curve / preset / instrument / default).
+
+    Es la vista de auditoría para reconciliar contra el sistema de primera
+    línea: permite responder "¿qué settlement_lag se aplicó a este bono y
+    de dónde salió?" sin leer el YAML a mano. Usa el mismo resolutor que el
+    cálculo, así que lo reportado es exactamente lo que se calculó.
+
+    payload = {config: {...}}"""
+    config = copy.deepcopy(payload["config"])
+    try:
+        return {"ok": True, **convention_report(config)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/apply-quotes")

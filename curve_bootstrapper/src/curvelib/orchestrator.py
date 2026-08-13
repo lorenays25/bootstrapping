@@ -130,6 +130,12 @@ def build_all(config: dict, verbose: bool = True, side: str = "mid") -> Dict[str
     ctx = CurveContext(curves={}, fx_spots=md.get("fx_spots", {}) or {})
     engine = BootstrapEngine(val_date, ctx)
 
+    # Presets de convención con nombre, definidos en la raíz del YAML.
+    # Un instrumento los referencia con `convention: <nombre>`; sirven para
+    # no repetir la misma convención en, p.ej., los 8 bonos de una curva.
+    presets = config.get("conventions", {}) or {}
+    conv_warnings: List[str] = []
+
     curves_cfg = config["curves"]
     order = topological_order(curves_cfg)
     if verbose:
@@ -148,10 +154,13 @@ def build_all(config: dict, verbose: bool = True, side: str = "mid") -> Dict[str
             "projection": _resolve(spec.get("projection"), name),
             "other_leg": _resolve(spec.get("other_leg"), name),
         }
-        instruments = [make_instrument(ispec, conv, curve_names, side=side)
+        warns: List[str] = []
+        instruments = [make_instrument(ispec, conv, curve_names, side=side,
+                                       presets=presets, warnings_out=warns)
                        for ispec in spec.get("instruments", [])]
         if not instruments:
             raise ConfigError(f"[{name}] no tiene instrumentos definidos.")
+        conv_warnings.extend(f"[{name}] {w}" for w in warns)
 
         curve = engine.build_curve(
             name, instruments,
@@ -163,7 +172,71 @@ def build_all(config: dict, verbose: bool = True, side: str = "mid") -> Dict[str
             print(f"  ✓ {name:<22} {len(curve.times) - 1:>2} pilares | "
                   f"último nodo t={last_t:6.2f}y  DF={curve.df_t(last_t):.6f}")
 
+    if verbose and conv_warnings:
+        print(f"\n  Avisos de convención ({len(conv_warnings)}):")
+        for w in dict.fromkeys(conv_warnings):     # dedup preservando orden
+            print(f"    ! {w}")
+
     return ctx.curves
+
+
+def convention_report(config: dict, side: str = "mid") -> dict:
+    """Reporte de la convención EFECTIVA de cada instrumento de cada curva,
+    con la procedencia de cada campo (curva / preset / instrumento / default).
+
+    Es la vista de auditoría para reconciliar contra el sistema de primera
+    línea: responde "¿qué settlement_lag se usó en este pilar y de dónde
+    salió?" sin leer el YAML a mano. Usa exactamente el mismo resolutor que
+    el cálculo, así que lo reportado es lo que se calculó.
+    """
+    from .conventions import effective_conventions
+    from .instruments import (CONVENTION_SCHEMA, class_defaults_for_type,
+                              resolve_instrument_conventions)
+
+    presets = config.get("conventions", {}) or {}
+    out = {"curves": {}, "warnings": []}
+    for name, spec in config["curves"].items():
+        conv = dict(spec.get("conventions", {}) or {})
+        rows = []
+        types_present = []
+        for idx, ispec in enumerate(spec.get("instruments", []) or []):
+            itype, resolved, prov, warns = resolve_instrument_conventions(
+                ispec, conv, presets)
+            out["warnings"].extend(f"[{name}] {w}" for w in warns)
+            if itype not in types_present:
+                types_present.append(itype)
+            rows.append({
+                "index": idx,
+                "type": itype,
+                "label": ispec.get("tenor") or ispec.get("maturity")
+                         or ispec.get("ticker") or f"#{idx}",
+                "preset": ispec.get("convention"),
+                "conventions": effective_conventions(
+                    itype, resolved, prov, CONVENTION_SCHEMA,
+                    class_defaults_for_type(itype)),
+            })
+
+        # Una convención definida a nivel de curva que no aplica a NINGUNO de
+        # sus instrumentos se hereda y nunca se lee: no rompe nada, pero no
+        # hace nada. Es fácil de cometer (p.ej. poner settlement_lag, que solo
+        # usan los bonos, en una curva que solo tiene swaps) y sin este aviso
+        # pasa inadvertido.
+        for field in conv:
+            fspec = CONVENTION_SCHEMA.get(field)
+            if fspec is None:
+                out["warnings"].append(
+                    f"[{name}] convención de curva desconocida '{field}' (¿typo?). Se ignora.")
+                continue
+            applies = fspec.get("applies_to")
+            if applies and types_present and not (set(applies) & set(types_present)):
+                out["warnings"].append(
+                    f"[{name}] la convención de curva '{field}' no la usa ningún "
+                    f"instrumento de esta curva (tipos presentes: "
+                    f"{', '.join(sorted(types_present))}). No tiene efecto.")
+
+        out["curves"][name] = {"types_present": sorted(types_present),
+                               "instruments": rows}
+    return out
 
 
 class CurveSet:

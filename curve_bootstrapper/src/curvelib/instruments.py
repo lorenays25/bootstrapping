@@ -29,6 +29,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from . import conventions as _conv
 from . import dates as dt
 from .curve import Curve
 
@@ -125,12 +126,29 @@ class Instrument(ABC):
         return self.model_quote(ctx) - self.quote
 
     # -------- helpers comunes
+    def _pay_delay(self, leg: str) -> int:
+        """Días hábiles de pay delay de UNA pata ('fixed' | 'float').
+
+        Precedencia: la convención específica de la pata
+        (fixed_pay_delay_days / float_pay_delay_days) gana sobre la genérica
+        pay_delay_days. Si solo se define la genérica, ambas patas la usan
+        -- que es el comportamiento histórico, por lo que configuraciones
+        existentes no cambian en nada.
+
+        Existe porque las dos patas de un swap pueden pagar con desfases
+        distintos: es convención de mercado, no un caso de borde."""
+        specific = self.conv.get(f"{leg}_pay_delay_days")
+        if specific is not None:
+            return int(specific)
+        return int(self.conv.get("pay_delay_days", 0))
+
     def _annuity(self, curve: Curve, pay_dates: List[_dt.date],
                  start: _dt.date, day_count: str) -> float:
-        """Σ τ_i · DF(pay_i) sobre el schedule de pagos.
-        pay_delay_days (default 0) desplaza SOLO la fecha de descuento
-        (pay_i); el devengo (τ) sigue usando las fechas de fin de periodo."""
-        pay_delay = int(self.conv.get("pay_delay_days", 0))
+        """Σ τ_i · DF(pay_i) sobre el schedule de pagos de la PATA FIJA.
+        El pay delay (fixed_pay_delay_days, o pay_delay_days) desplaza SOLO
+        la fecha de descuento (pay_i); el devengo (τ) sigue usando las
+        fechas de fin de periodo."""
+        pay_delay = self._pay_delay("fixed")
         cal = self.conv.get("calendar", "WEEKENDS")
         a, prev = 0.0, start
         for d in pay_dates:
@@ -213,7 +231,10 @@ class OISSwap(Instrument):
         dc = self.conv.get("day_count", "ACT/360")
         ann = self._annuity(c, self.fixed_dates, self.start_date, dc)
         cutoff = int(self.conv.get("rate_cutoff_days", 0))
-        pay_delay = int(self.conv.get("pay_delay_days", 0))
+        # El atajo telescópico aplica al NUMERADOR (pata flotante): solo
+        # depende del delay de esa pata. El de la pata fija ya está dentro
+        # de `ann`, así que no condiciona este camino.
+        pay_delay = self._pay_delay("float")
         if cutoff == 0 and pay_delay == 0:
             # atajo telescópico exacto (comportamiento actual, sin cambios)
             return (c.df(self.start_date) - c.df(self.pillar_date)) / ann
@@ -328,7 +349,7 @@ class XCCYBasis(Instrument):
             raise ValueError(
                 f"accrual_convention={mode!r} inválido. Usa uno de {ACCRUAL_CONVENTIONS}."
             )
-        pay_delay = int(self.conv.get("pay_delay_days", 0))
+        pay_delay = self._pay_delay("float")
         cal = self.conv.get("calendar", "WEEKENDS")
         num, den, prev = 0.0, 0.0, self.start_date
         for d in self.float_dates:
@@ -370,7 +391,7 @@ class TenorBasisSwap(Instrument):
             raise ValueError(
                 f"accrual_convention={mode!r} inválido. Usa uno de {ACCRUAL_CONVENTIONS}."
             )
-        pay_delay = int(self.conv.get("pay_delay_days", 0))
+        pay_delay = self._pay_delay("float")
         cal = self.conv.get("calendar", "WEEKENDS")
         num, den, prev = 0.0, 0.0, self.start_date
         for d in self.float_dates:
@@ -406,7 +427,7 @@ class IBORSwap(Instrument):
         cd = ctx.curve(self.curve_names["discount"])
         dc_fix = self.conv.get("day_count", "ACT/360")
         dc_flt = self.conv.get("float_day_count", dc_fix)
-        pay_delay = int(self.conv.get("pay_delay_days", 0))
+        pay_delay = self._pay_delay("float")
         cal = self.conv.get("calendar", "WEEKENDS")
         pv_float, prev = 0.0, self.start_date
         for d in self.float_dates:
@@ -487,6 +508,145 @@ class UVRSwap(XCCYFixedFloat):
 
 
 # ============================================================================
+# 8) Bono soberano de tasa fija — parte larga de curvas EM sin OIS líquido
+#    (p.ej. Soberanos PEN en soles, Calc Type 1275 de Bloomberg).
+#
+#    Se diferencia de todos los anteriores en TRES cosas:
+#      a) el pilar es la fecha de VENCIMIENTO, no un tenor desde spot;
+#      b) calibra contra un PRECIO de mercado, no contra par/tasa;
+#      c) tiene su propia fecha de liquidación (settlement_lag), que puede
+#         diferir del spot_lag de los swaps de la MISMA curva (caso real:
+#         OIS PEN liquida T+2, bono PEN liquida T+1).
+#
+#    Ecuación de calibración (self-discounting: se descuenta sobre la misma
+#    curva que se construye), con todo expresado a fecha de liquidación:
+#
+#        precio_sucio_mkt = [ Σ c_i · DF(t_i) + R · DF(T) ] / DF(settle)
+#
+#    donde c_i = cupón/frecuencia por 100 de face (periodos regulares
+#    30/360 => exactamente cupón/2 en semestral, sin stub), R = redención,
+#    y precio_sucio_mkt = precio_limpio cotizado + interés corrido.
+#
+#    El residual es monótono en DF(T) => Brent 1D sirve en modo secuencial;
+#    en tramos largos dominados por bonos conviene mode: global (LM), porque
+#    los cupones de cada bono dependen de TODOS los pilares previos.
+# ============================================================================
+_FREQ_TO_MONTHS = {"annual": 12, "semiannual": 6, "quarterly": 3, "monthly": 1}
+PRICE_TYPES = ("clean_price", "dirty_price")
+
+
+@dataclass
+class SovereignBond(Instrument):
+    _native_reset = "in_advance"
+
+    def build(self, valuation_date: _dt.date) -> None:
+        self._validate_reset_position()
+        cal = self.conv.get("calendar", "WEEKENDS")
+        # settlement_lag es PROPIO del bono: no reusa spot_lag, que es la
+        # convención de los swaps. Así conviven T+1 (bono) y T+2 (OIS) en
+        # la misma curva.
+        lag = int(self.conv.get("settlement_lag", 1))
+        bdc = self.conv.get("business_day_convention", "F")
+
+        mat = self.conv.get("maturity")
+        if mat is None:
+            raise ValueError("sovereign_bond requiere 'maturity' (fecha ISO YYYY-MM-DD).")
+        if isinstance(mat, str):
+            mat = _dt.date.fromisoformat(mat[:10])
+        elif isinstance(mat, _dt.datetime):
+            mat = mat.date()
+        self.maturity = mat
+        self.pillar_date = mat
+
+        if self.conv.get("coupon") is None:
+            raise ValueError("sovereign_bond requiere 'coupon' (tasa en %, ej. 5.94).")
+        self.coupon = float(self.conv["coupon"])
+        self.redemption = float(self.conv.get("redemption", 100.0))
+
+        freq = str(self.conv.get("coupon_freq", "semiannual")).lower()
+        if freq not in _FREQ_TO_MONTHS:
+            raise ValueError(
+                f"coupon_freq={freq!r} inválido. Usa uno de {tuple(_FREQ_TO_MONTHS)}."
+            )
+        self._period_months = _FREQ_TO_MONTHS[freq]
+
+        ptype = self.conv.get("price_type", "clean_price")
+        if ptype not in PRICE_TYPES:
+            raise ValueError(f"price_type={ptype!r} inválido. Usa uno de {PRICE_TYPES}.")
+
+        self.settle_date = dt.spot_date(valuation_date, lag, cal)
+        if self.settle_date >= self.maturity:
+            raise ValueError(
+                f"sovereign_bond vencido o con vencimiento anterior a la liquidación: "
+                f"maturity={self.maturity}, settle={self.settle_date}."
+            )
+        self.start_date = self.settle_date       # interfaz común de Instrument
+        self._build_coupon_schedule(cal, bdc)
+
+    def _build_coupon_schedule(self, cal, bdc) -> None:
+        """Cupones FUTUROS (posteriores a la liquidación), generados hacia
+        atrás desde el vencimiento en pasos de coupon_freq — así el ciclo
+        queda anclado al vencimiento (12-Feb/12-Ago en los Soberanos PEN).
+
+        Las fechas de DEVENGO van sin ajustar (definen el corrido y el monto
+        del cupón); solo la fecha de PAGO se ajusta a día hábil, y es la que
+        se usa para descontar."""
+        future_unadj: List[_dt.date] = []
+        k = 0
+        while True:
+            d = dt.add_months(self.maturity, -self._period_months * k)
+            if d <= self.settle_date:
+                prev_cpn = d                     # último cupón ya pagado
+                break
+            future_unadj.append(d)
+            k += 1
+        future_unadj.reverse()                   # ascendente; el último = maturity
+        self.coupon_dates = future_unadj
+        self.pay_dates = [dt.adjust(d, cal, bdc) for d in future_unadj]
+        self.prev_cpn = prev_cpn
+        self.next_cpn = future_unadj[0]
+
+    def _coupon_amount(self) -> float:
+        """Monto del cupón por 100 de face. En periodos regulares 30/360 cada
+        cupón es exactamente cupón/frecuencia (no hay stub: los Soberanos PEN
+        tienen cupones regulares y su primer cupón irregular ya pasó)."""
+        return self.coupon / (12.0 / self._period_months)
+
+    def _accrued(self) -> float:
+        """Interés corrido a la fecha de liquidación.
+
+        ACT/ACT (ISMA) es proporción del periodo de cupón: el corrido es
+        cupón × (días transcurridos / días del periodo). Cualquier otro day
+        count se aplica como devengo sobre la TASA: cupón_rate × τ(prev, settle).
+        Son fórmulas distintas y no intercambiables."""
+        dc = str(self.conv.get("daycount_accrued", "ACT/ACT_ISMA")).upper()
+        if dc in ("ACT/ACT_ISMA", "ACT/ACT"):
+            period_days = (self.next_cpn - self.prev_cpn).days
+            if period_days <= 0:
+                return 0.0
+            frac = (self.settle_date - self.prev_cpn).days / period_days
+            return self._coupon_amount() * frac
+        return self.coupon * dt.year_fraction(dc, self.prev_cpn, self.settle_date)
+
+    def model_quote(self, ctx: CurveContext) -> float:
+        """Precio SUCIO modelo, expresado a fecha de liquidación."""
+        c = ctx.curve(self.curve_names["discount"])   # self-discounting
+        cpn = self._coupon_amount()
+        pv = sum(cpn * c.df(d) for d in self.pay_dates)
+        pv += self.redemption * c.df(self.pay_dates[-1])
+        return pv / c.df(self.settle_date)
+
+    def market_dirty_price(self) -> float:
+        """Precio sucio de mercado: el quote más el corrido si cotiza limpio."""
+        if self.conv.get("price_type", "clean_price") == "dirty_price":
+            return self.quote
+        return self.quote + self._accrued()
+
+    def residual(self, ctx: CurveContext) -> float:
+        return self.model_quote(ctx) - self.market_dirty_price()
+
+
+# ============================================================================
 # Registro de tipos para el orquestador (nombre en YAML -> clase)
 # ============================================================================
 INSTRUMENT_TYPES = {
@@ -501,6 +661,7 @@ INSTRUMENT_TYPES = {
     "fra": FRA,
     "future": FRA,          # misma clase; difiere en quote_convention (ver abajo)
     "uvr_swap": UVRSwap,
+    "sovereign_bond": SovereignBond,
 }
 
 # Default de quote_convention según el tipo, si el usuario no lo especifica
@@ -526,73 +687,243 @@ _DEFAULT_QUOTE_CONVENTION = {"fra": "rate", "future": "price"}
 #   "int"           -> texto libre numérico
 #   "string"        -> texto libre sin restricción
 # ============================================================================
+# ---------------------------------------------------------------------------
+# Etiquetas legibles de los valores de convención.
+#
+# Viven ACÁ y no en el HTML a propósito: si el motor gana un valor nuevo (una
+# frecuencia, una BDC), la UI lo muestra con su nombre sin tocar el frontend.
+# La UI las consume vía /schema. Si un valor no tiene etiqueta, se muestra el
+# código crudo -- así agregar un valor nunca rompe la interfaz.
+# ---------------------------------------------------------------------------
+FREQ_LABELS = {
+    "A": "Anual", "S": "Semestral", "Q": "Trimestral", "M": "Mensual",
+    "Z": "Cupón cero (un solo pago al vencimiento)",
+}
+
+VALUE_LABELS = {
+    "business_day_convention": {
+        "MF": "Modified Following — siguiente hábil, salvo cambio de mes",
+        "F": "Following — siguiente día hábil",
+        "P": "Preceding — día hábil anterior",
+        "NONE": "Sin ajuste",
+    },
+    "short_end_payment_style": {
+        "bullet": "Bullet — un solo pago al vencimiento",
+        "periodic": "Periódica — según la frecuencia fija",
+    },
+    "reset_position": {
+        "in_arrears": "In arrears — fixing al final del periodo",
+        "in_advance": "In advance — fixing al inicio del periodo",
+    },
+    "accrual_convention": {
+        "excl_spread": "Spread excluido del compounding",
+        "incl_spread": "Spread incluido en el compounding",
+    },
+    "price_type": {
+        "clean_price": "Precio limpio (se le suma el corrido)",
+        "dirty_price": "Precio sucio (ya incluye el corrido)",
+    },
+    "coupon_freq": {
+        "annual": "Anual", "semiannual": "Semestral",
+        "quarterly": "Trimestral", "monthly": "Mensual",
+    },
+    "solve_for": {
+        "quote_ccy": "Moneda cotizada (term)",
+        "base_ccy": "Moneda base",
+    },
+    "quote_type": {
+        "points": "Puntos forward", "outright": "Outright",
+    },
+    "quote_convention": {
+        "rate": "Tasa (FRA)", "price": "Precio 100 - tasa (futuro)",
+    },
+    "end_of_month": {"true": "Sí — regla fin de mes", "false": "No"},
+    "fixed_freq": FREQ_LABELS,
+    "float_freq": FREQ_LABELS,
+}
+
+
+def value_labels(field: str) -> dict:
+    """Etiquetas legibles de los valores de una convención ({} si no tiene)."""
+    return VALUE_LABELS.get(field, {})
+
+
+# Grupos de tipos, para declarar a qué instrumentos aplica cada convención.
+_ALL_TYPES = ("mm", "deposit", "ois_swap", "fx_forward", "xccy_fixed_float",
+              "xccy_basis", "tenor_basis", "ibor_swap", "fra", "future",
+              "uvr_swap", "sovereign_bond")
+_NON_BOND = tuple(t for t in _ALL_TYPES if t != "sovereign_bond")
+_FIXED_LEG = ("ois_swap", "ibor_swap", "xccy_fixed_float", "uvr_swap")
+_FLOAT_LEG = ("ibor_swap", "xccy_basis", "tenor_basis")
+_PAY_DELAY = ("ois_swap", "ibor_swap", "xccy_basis", "tenor_basis",
+              "xccy_fixed_float", "uvr_swap")
+_FRA_LIKE = ("fra", "future")
+_BOND = ("sovereign_bond",)
+
+
 CONVENTION_SCHEMA = {
     "calendar": {
-        "type": "calendar", "suggestions": dt.calendar_codes(),
+        "type": "calendar", "suggestions": dt.calendar_codes(), "applies_to": _ALL_TYPES,
         "description": "Código de calendario, o lista tipo [US,PE] para calendario conjunto.",
     },
     "day_count": {
-        "type": "day_count", "suggestions": dt.day_count_codes(),
+        "type": "day_count", "suggestions": dt.day_count_codes(), "applies_to": _NON_BOND,
         "description": "Day count de la pata fija.",
     },
     "float_day_count": {
-        "type": "day_count", "suggestions": dt.day_count_codes(),
+        "type": "day_count", "suggestions": dt.day_count_codes(), "applies_to": ("ibor_swap",),
         "description": "Day count de la pata flotante (default: igual a day_count). Solo ibor_swap.",
     },
     "spot_lag": {
-        "type": "int", "default": 2,
-        "description": "Días hábiles de fecha de valuación a fecha spot.",
+        "type": "int", "default": 2, "applies_to": _NON_BOND,
+        "description": "Días hábiles de fecha de valuación a fecha spot. "
+                       "Los bonos NO lo usan: tienen settlement_lag propio.",
     },
     "fixed_freq": {
-        "type": "tenor_pattern", "suggestions": ["A", "S", "Q", "M", "Z"],
+        "type": "tenor_pattern", "suggestions": ["A", "S", "Q", "M", "Z"], "applies_to": _FIXED_LEG,
         "description": "Frecuencia de pago fija: preset o tenor libre (ej. 4W para TIIE 28D).",
     },
     "float_freq": {
-        "type": "tenor_pattern", "suggestions": ["A", "S", "Q", "M"],
+        "type": "tenor_pattern", "suggestions": ["A", "S", "Q", "M"], "applies_to": _FLOAT_LEG,
         "description": "Frecuencia de pago flotante: preset o tenor libre. No aplica a ois_swap.",
     },
     "business_day_convention": {
         "type": "enum", "values": dt.business_day_convention_codes(), "default": "MF",
+        "applies_to": _ALL_TYPES,
         "description": "Ajuste de fecha hábil (Modified Following, Following, Preceding, sin ajuste).",
     },
     "end_of_month": {
-        "type": "bool", "default": False,
+        "type": "bool", "default": False, "applies_to": _NON_BOND,
         "description": "Regla EOM en la generación de schedules.",
     },
     "short_end_payment_style": {
-        "type": "enum", "values": list(SHORT_END_STYLES),
+        "type": "enum", "values": list(SHORT_END_STYLES), "applies_to": _FIXED_LEG,
         "description": "Pago bullet o periódico en tenores <=1Y "
                        "(default por type: bullet en ois_swap, periodic en el resto).",
     },
     "rate_cutoff_days": {
-        "type": "int", "default": 0,
+        "type": "int", "default": 0, "applies_to": ("ois_swap",),
         "description": "Días hábiles de rate cutoff (compounding congelado). Solo ois_swap.",
     },
     "pay_delay_days": {
-        "type": "int", "default": 0,
-        "description": "Días hábiles entre fin de periodo de devengo y pago, ambas patas.",
+        "type": "int", "default": 0, "applies_to": _PAY_DELAY,
+        "description": "Días hábiles entre fin de devengo y pago. Aplica a AMBAS patas, "
+                       "salvo que se defina el valor específico de una de ellas.",
+    },
+    "fixed_pay_delay_days": {
+        "type": "int", "applies_to": _PAY_DELAY,
+        "description": "Pay delay SOLO de la pata fija. Si se omite, usa pay_delay_days.",
+    },
+    "float_pay_delay_days": {
+        "type": "int", "applies_to": _PAY_DELAY,
+        "description": "Pay delay SOLO de la pata flotante. Si se omite, usa pay_delay_days.",
     },
     "reset_position": {
-        "type": "enum", "values": list(RESET_POSITIONS),
+        "type": "enum", "values": list(RESET_POSITIONS), "applies_to": _ALL_TYPES,
         "description": "Solo VALIDA contra el 'type' del instrumento; no cambia el pricing.",
     },
     "accrual_convention": {
         "type": "enum", "values": list(ACCRUAL_CONVENTIONS), "default": "excl_spread",
+        "applies_to": ("xccy_basis", "tenor_basis"),
         "description": "Cómo compone el spread sobre el índice. Solo xccy_basis/tenor_basis.",
     },
     "fx_pair": {
-        "type": "string",
-        "description": "Par FX, ej. USDPEN. Solo fx_forward/xccy_fixed_float/xccy_basis.",
+        "type": "string", "applies_to": ("fx_forward", "xccy_fixed_float", "xccy_basis"),
+        "description": "Par FX, ej. USDPEN.",
     },
     "solve_for": {
-        "type": "string",
-        "description": "quote_ccy | base_ccy -- qué lado del par FX es la incógnita.",
+        "type": "enum", "values": ["quote_ccy", "base_ccy"], "applies_to": ("fx_forward",),
+        "description": "Qué lado del par FX es la incógnita. Solo fx_forward.",
     },
     "points_factor": {
-        "type": "int",
-        "description": "Divisor de los puntos forward para llegar al outright.",
+        "type": "int", "applies_to": ("fx_forward",),
+        "description": "Divisor de los puntos forward para llegar al outright. Solo fx_forward.",
+    },
+    "quote_type": {
+        "type": "enum", "values": ["points", "outright"], "default": "points",
+        "applies_to": ("fx_forward",),
+        "description": "El quote FX son puntos forward o un outright. Solo fx_forward.",
+    },
+    "quote_convention": {
+        "type": "enum", "values": ["rate", "price"], "applies_to": _FRA_LIKE,
+        "description": "El quote es tasa (FRA) o precio 100-tasa (futuro). Solo fra/future.",
+    },
+    "convexity_bp": {
+        "type": "int", "default": 0, "applies_to": _FRA_LIKE,
+        "description": "Ajuste de convexidad en bp, alimentado desde tu modelo. Solo fra/future.",
+    },
+
+    # ---------------- convenciones propias de sovereign_bond ----------------
+    "maturity": {
+        "type": "string", "applies_to": _BOND,
+        "description": "Fecha de vencimiento YYYY-MM-DD. Es el pilar del bono. OBLIGATORIA.",
+    },
+    "coupon": {
+        "type": "string", "applies_to": _BOND,
+        "description": "Tasa de cupón anual en % (ej. 5.94). OBLIGATORIA.",
+    },
+    "coupon_freq": {
+        "type": "enum", "values": list(_FREQ_TO_MONTHS), "default": "semiannual",
+        "applies_to": _BOND,
+        "description": "Frecuencia de cupón del bono.",
+    },
+    "redemption": {
+        "type": "int", "default": 100, "applies_to": _BOND,
+        "description": "Nominal de redención al vencimiento.",
+    },
+    "price_type": {
+        "type": "enum", "values": list(PRICE_TYPES), "default": "clean_price",
+        "applies_to": _BOND,
+        "description": "El quote del bono es precio limpio (se le suma el corrido) o sucio.",
+    },
+    "settlement_lag": {
+        "type": "int", "default": 1, "applies_to": _BOND,
+        "description": "Días hábiles a la liquidación del bono. Independiente de spot_lag: "
+                       "permite que el bono liquide T+1 y el OIS T+2 en la misma curva.",
+    },
+    "daycount_accrued": {
+        "type": "day_count", "suggestions": dt.day_count_codes(), "default": "ACT/ACT_ISMA",
+        "applies_to": _BOND,
+        "description": "Day count del interés corrido. ACT/ACT_ISMA = proporción del periodo.",
     },
 }
+
+
+# Convenciones OBLIGATORIAS por tipo: si faltan tras resolver todas las
+# capas, la construcción falla con un mensaje claro en vez de un error
+# oscuro más adentro del motor.
+REQUIRED_BY_TYPE = {
+    "sovereign_bond": ("maturity", "coupon"),
+    "fx_forward": ("fx_pair",),
+}
+
+
+# Adjunta las etiquetas legibles a cada campo del catálogo, para que /schema
+# las entregue junto al resto y la UI no tenga que conocerlas.
+for _f, _spec in CONVENTION_SCHEMA.items():
+    _lbl = VALUE_LABELS.get(_f)
+    if _lbl:
+        _spec["labels"] = _lbl
+del _f, _spec, _lbl
+
+
+def conventions_for_type(itype: str) -> dict:
+    """Subconjunto del catálogo aplicable a un tipo de instrumento.
+    Lo consume la UI para ofrecer, en cada instrumento, solo las
+    convenciones que ese instrumento realmente usa."""
+    return {k: v for k, v in CONVENTION_SCHEMA.items()
+            if itype in (v.get("applies_to") or _ALL_TYPES)}
+
+
+def class_defaults_for_type(itype: str) -> dict:
+    """Defaults que dependen de la CLASE (no del catálogo), para reporte.
+    Hoy: short_end_payment_style, que es 'bullet' en ois_swap y 'periodic'
+    en el resto."""
+    cls = INSTRUMENT_TYPES.get(itype)
+    if cls is None:
+        return {}
+    return {"short_end_payment_style": getattr(cls, "_short_end_default", None)}
+
 
 
 def _select_quote(spec: dict, side: str) -> float:
@@ -614,17 +945,54 @@ def _select_quote(spec: dict, side: str) -> float:
     return float(q)
 
 
-def make_instrument(spec: dict, conv: dict, curve_names: dict,
-                    side: str = "mid") -> Instrument:
-    itype = spec["type"]
+def resolve_instrument_conventions(spec: dict, conv: dict,
+                                   presets: dict | None = None,
+                                   strict: bool = False):
+    """Resuelve la convención efectiva de UN instrumento y la valida.
+
+    Devuelve (itype, resuelto, procedencia, avisos). Es el punto ÚNICO
+    donde se decide qué convención rige cada instrumento; tanto el
+    constructor de instrumentos como el reporte /conventions lo usan, así
+    que lo que se reporta es exactamente lo que se calcula.
+    """
+    itype = _conv.instrument_type(spec, presets)
+    if itype is None:
+        raise KeyError(
+            f"El instrumento no declara 'type' ni hereda uno de un preset: {spec!r}"
+        )
     if itype not in INSTRUMENT_TYPES:
         raise KeyError(f"Tipo de instrumento desconocido: '{itype}'. "
                        f"Disponibles: {list(INSTRUMENT_TYPES)}")
-    merged_conv = {**conv, **{k: v for k, v in spec.items()
-                              if k not in ("type", "tenor", "quote")}}
+
+    resolved, provenance = _conv.resolve(spec, conv, presets)
+    warnings = _conv.validate(itype, resolved, CONVENTION_SCHEMA,
+                              REQUIRED_BY_TYPE, provenance, strict=strict)
+
     if itype in _DEFAULT_QUOTE_CONVENTION:
-        merged_conv.setdefault("quote_convention", _DEFAULT_QUOTE_CONVENTION[itype])
+        if resolved.get("quote_convention") is None:
+            resolved["quote_convention"] = _DEFAULT_QUOTE_CONVENTION[itype]
+            provenance["quote_convention"] = "default"
+
+    return itype, resolved, provenance, warnings
+
+
+def make_instrument(spec: dict, conv: dict, curve_names: dict,
+                    side: str = "mid", presets: dict | None = None,
+                    strict: bool = False,
+                    warnings_out: list | None = None) -> Instrument:
+    """Construye el instrumento con su convención propia ya resuelta.
+
+    La convención de cada instrumento se resuelve por capas
+    (curva -> preset -> instrumento), de modo que dos instrumentos de la
+    MISMA curva pueden tener convenciones distintas: p.ej. un ois_swap con
+    spot_lag 2 y un sovereign_bond con settlement_lag 1.
+    """
+    itype, resolved, _prov, warns = resolve_instrument_conventions(
+        spec, conv, presets, strict=strict)
+    if warnings_out is not None:
+        warnings_out.extend(warns)
     return INSTRUMENT_TYPES[itype](
-        tenor=spec["tenor"], quote=_select_quote(spec, side),
-        conv=merged_conv, curve_names=curve_names,
+        tenor=spec.get("tenor"),          # None en bonos: su pilar es 'maturity'
+        quote=_select_quote(spec, side),
+        conv=resolved, curve_names=curve_names,
     )

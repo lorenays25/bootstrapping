@@ -97,6 +97,50 @@
   .conv-row{display:grid;grid-template-columns:170px 1fr 32px;gap:8px;margin-bottom:7px;align-items:center}
   .empty{color:var(--muted);font-family:var(--mono);font-size:12px;padding:8px 2px}
 
+  /* ---------- panel de convenciones por instrumento ---------- */
+  .ins-gear{font-family:var(--mono);font-size:11px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:3px;padding:3px 9px;color:var(--muted);white-space:nowrap}
+  .ins-gear:hover{color:var(--cyan);border-color:var(--cyan)}
+  .ins-gear.on{color:var(--amber);border-color:var(--amber)}
+  .ins-gear .badge{color:var(--amber);font-weight:600}
+  tr.ins-detail > td{background:var(--bg);border-bottom:1px solid var(--line);padding:0}
+  .ins-panel{padding:14px 18px 16px;border-left:2px solid var(--amber);margin:2px 0 6px}
+  .ins-panel h4{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;
+    margin:0 0 9px;display:flex;align-items:center;gap:9px}
+  .ins-panel h4::after{content:"";flex:1;height:1px;background:var(--line)}
+  .ins-panel h4 + .conv-row{margin-top:2px}
+  .ins-panel .sect{margin-bottom:16px}
+  .ins-panel .sect:last-child{margin-bottom:0}
+  /* fila heredada: solo lectura, muestra de qué capa viene */
+  .inh-row{display:grid;grid-template-columns:170px 1fr 90px 78px;gap:8px;
+    margin-bottom:5px;align-items:center;font-family:var(--mono);font-size:11.5px}
+  .inh-row .k{color:var(--muted)}
+  .inh-row .v{color:var(--text);background:var(--panel-2);border:1px solid var(--line);
+    border-radius:3px;padding:4px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .src{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;text-align:center;
+    border-radius:3px;padding:2px 5px;border:1px solid}
+  .src-curve{color:var(--cyan);border-color:#1e3a4a}
+  .src-preset{color:var(--amber);border-color:#4a3a1e}
+  .src-default{color:var(--muted);border-color:var(--line)}
+  .btn-ovr{font-size:10px;padding:3px 6px;background:none;border:1px solid var(--line);
+    border-radius:3px;color:var(--muted);white-space:nowrap}
+  .btn-ovr:hover{color:var(--amber);border-color:var(--amber)}
+  .req-tag{font-size:9px;color:var(--red);letter-spacing:.06em}
+  .q3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px}
+  .q3 input{padding:4px 4px;font-size:11px;text-align:right}
+  .q3 .lbl{font-size:9px;color:var(--muted);text-align:center;letter-spacing:.06em}
+  /* pie del panel: cierre explícito */
+  .panel-foot{display:flex;align-items:center;gap:12px;margin-top:14px;
+    padding-top:12px;border-top:1px solid var(--line)}
+  .btn-done{font-family:var(--mono);font-size:11.5px;padding:6px 16px;border-radius:3px;
+    background:var(--amber);color:var(--ink);border:none;font-weight:600}
+  .btn-done:hover{filter:brightness(1.1)}
+  .foot-hint{font-size:10.5px;color:var(--muted)}
+  /* aviso: convención de curva que ningún instrumento usa */
+  .conv-warn{grid-column:1/-1;font-size:10.5px;color:var(--amber);
+    background:#2a2113;border:1px solid #4a3a1e;border-radius:3px;
+    padding:5px 9px;margin:-3px 0 8px}
+
   /* modal export */
   dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);
     border-radius:8px;padding:0;width:min(760px,92vw);max-height:82vh}
@@ -804,8 +848,48 @@ let cfg = null;            // objeto de configuración (espejo del YAML)
 let selected = null;       // nombre de la curva seleccionada
 let schema = null;         // catálogo de convenciones (GET /schema); null = degrade a texto libre
 
-const INSTRUMENT_TYPES = ["ois_swap","ibor_swap","fra","future","fx_forward",
-  "xccy_fixed_float","xccy_basis","tenor_basis","uvr_swap"];
+let typesInfo = null;      // GET /schema/types: tipos + convenciones por tipo
+/* Respaldo SOLO para cuando /schema/types no responde. No es la fuente de
+   verdad: el motor la expone en runtime. Si se usa este respaldo, la UI lo
+   advierte (mismo criterio que la config embebida). */
+const INSTRUMENT_TYPES_FALLBACK = ["ois_swap","ibor_swap","fra","future","fx_forward",
+  "xccy_fixed_float","xccy_basis","tenor_basis","uvr_swap","sovereign_bond","mm"];
+function instrumentTypes(){
+  return (typesInfo && typesInfo.instrument_types) || INSTRUMENT_TYPES_FALLBACK;
+}
+/* Convenciones aplicables a un tipo, según el motor. Permite ofrecer en cada
+   instrumento solo lo que ese instrumento usa (un bono no muestra
+   rate_cutoff_days; un OIS no muestra coupon_freq). */
+function conventionsForType(t){
+  if(typesInfo && typesInfo.by_type && typesInfo.by_type[t]) return typesInfo.by_type[t];
+  return schema ? Object.keys(schema) : [];
+}
+function requiredForType(t){
+  return (typesInfo && typesInfo.required_by_type && typesInfo.required_by_type[t]) || [];
+}
+/* Etiqueta legible de un valor de convención. Viene del catálogo del motor
+   (/schema); si un valor no tiene etiqueta se muestra el código crudo, así
+   agregar valores nuevos nunca rompe la UI. */
+function valueLabel(field, v){
+  const m = schema && schema[field] && schema[field].labels;
+  const lbl = m && m[String(v)];
+  return lbl ? `${v} · ${lbl}` : String(v);
+}
+/* Tipos de instrumento presentes en la curva seleccionada: sirve para acotar
+   el selector de convenciones DE CURVA a lo que sus instrumentos usan. */
+function typesInCurve(c){
+  const out = new Set();
+  (c.instruments||[]).forEach(ins=>{ const t=insType(ins); if(t) out.add(t); });
+  return [...out];
+}
+/* Unión de convenciones aplicables a los tipos presentes en la curva. */
+function conventionsForCurve(c){
+  const types = typesInCurve(c);
+  if(!types.length) return schema ? Object.keys(schema) : [];
+  const out = new Set();
+  types.forEach(t=> conventionsForType(t).forEach(k=> out.add(k)));
+  return [...out].sort();
+}
 const $ = s => document.querySelector(s);
 
 function setStatus(msg, cls=""){ const el=$("#status"); el.textContent=msg; el.className="status "+cls; }
@@ -834,10 +918,17 @@ async function initConfig(){
     try{
       const schemaResp = await fetch("/schema");
       if(schemaResp.ok) schema = await schemaResp.json();
+      const typesResp = await fetch("/schema/types");
+      if(typesResp.ok) typesInfo = await typesResp.json();
     }catch(_){ /* catálogo opcional: si falla, los campos de convención
                   vuelven a texto libre -- no debe tumbar la carga de /config */ }
     renderAll();
-    setStatus(`Config cargada desde config/curves.yaml (${Object.keys(cfg.curves).length} curvas)`, "ok");
+    if(!typesInfo){
+      setStatus(`Config cargada (${Object.keys(cfg.curves).length} curvas) — ⚠ /schema/types no respondió: `
+        + `lista de tipos de instrumento de respaldo (puede estar desactualizada)`, "err");
+    } else {
+      setStatus(`Config cargada desde config/curves.yaml (${Object.keys(cfg.curves).length} curvas)`, "ok");
+    }
   }catch(err){
     console.error("GET /config falló:", err);
     loadEmbeddedDefault();
@@ -934,8 +1025,9 @@ function renderEditor(){
   <div class="card">
     <h3>Instrumentos · ${(c.instruments||[]).length}</h3>
     <table>
-      <thead><tr><th style="width:190px">Tipo</th><th style="width:90px">Tenor</th>
-        <th style="width:130px">Quote</th><th>Overrides (clave=valor, …)</th><th></th></tr></thead>
+      <thead><tr><th style="width:160px">Tipo</th><th style="width:105px">Tenor / Venc.</th>
+        <th style="width:170px">Quote · bid / mid / ask</th><th style="width:150px">Preset</th>
+        <th style="width:150px">Convenciones</th><th style="width:30px"></th></tr></thead>
       <tbody id="ins-body">
         ${(c.instruments||[]).map((ins,i)=>insRow(ins,i)).join("")}
       </tbody>
@@ -949,15 +1041,23 @@ function renderEditor(){
 function convRow(k,v){
   const val = Array.isArray(v) ? v.join(",") : String(v??"");
   const meta = schema && schema[k];
+  const c = cfg.curves[selected] || {};
+
+  /* El selector se acota a las convenciones que USAN los instrumentos de esta
+     curva. Antes ofrecía las 26 del catálogo, lo que permitía poner (por
+     ejemplo) settlement_lag -- que solo leen los bonos -- en una curva de puros
+     swaps, donde se hereda pero nunca se lee. */
+  const applicable = conventionsForCurve(c);
+  const unused = k && applicable.length && !applicable.includes(k);
 
   let keyField;
   if(schema){
-    const used = new Set(Object.keys((cfg.curves[selected]||{}).conventions||{}));
-    const options = Object.keys(schema).filter(name=> name===k || !used.has(name)).sort();
+    const used = new Set(Object.keys(c.conventions||{}));
+    const options = applicable.filter(name=> name===k || !used.has(name));
     keyField = `<select class="conv-k" aria-label="clave">
       <option value="" ${k?"":"selected"}>— elegir —</option>
       ${options.map(name=>`<option value="${name}" ${name===k?"selected":""}>${name}</option>`).join("")}
-      ${(k && !schema[k]) ? `<option value="${k}" selected>${k} (no catalogada)</option>` : ""}
+      ${(k && !applicable.includes(k)) ? `<option value="${k}" selected>${k}</option>` : ""}
     </select>`;
   } else {
     keyField = `<input class="conv-k" value="${k}" aria-label="clave">`;
@@ -968,27 +1068,219 @@ function convRow(k,v){
     const values = meta.type==="bool" ? ["true","false"] : meta.values;
     valField = `<select class="conv-v" aria-label="valor">
       <option value="" ${val?"":"selected"}>— elegir —</option>
-      ${values.map(opt=>`<option value="${opt}" ${opt===val?"selected":""}>${opt}</option>`).join("")}
+      ${values.map(opt=>`<option value="${opt}" ${opt===val?"selected":""}>${valueLabel(k,opt)}</option>`).join("")}
       ${(val && !values.includes(val)) ? `<option value="${val}" selected>${val} (no catalogado)</option>` : ""}
     </select>`;
+  } else if(meta && meta.suggestions && meta.suggestions.length){
+    const listId = `sug-${k}`;
+    valField = `<input class="conv-v" value="${val}" aria-label="valor" list="${listId}">
+      <datalist id="${listId}">${meta.suggestions.map(o=>
+        `<option value="${o}">${valueLabel(k,o)}</option>`).join("")}</datalist>`;
   } else {
     valField = `<input class="conv-v" value="${val}" aria-label="valor">`;
   }
 
+  const warn = unused
+    ? `<div class="conv-warn">Ningún instrumento de esta curva usa <b>${k}</b>: se hereda pero no se lee.</div>`
+    : "";
   return `<div class="conv-row">${keyField}${valField}
-    <button class="row-del conv-del" aria-label="quitar">×</button></div>`;
+    <button class="row-del conv-del" aria-label="quitar">×</button></div>${warn}`;
+}
+
+/* Claves del instrumento que son DATOS, no convenciones. Deben coincidir con
+   NON_CONVENTION_KEYS de src/curvelib/conventions.py. 'maturity' se maneja
+   aparte: es convención en el backend, pero acá tiene columna propia. */
+const INS_DATA_KEYS = ["type","tenor","quote","convention","conventions","ticker","maturity"];
+
+/* Instrumentos con el panel de convenciones abierto (sobrevive al re-render). */
+const expandedIns = new Set();
+
+function presetType(name){
+  if(!name || !cfg || !cfg.conventions) return null;
+  const p = cfg.conventions[name];
+  return p ? (p.type || null) : null;
+}
+function presetConv(name){
+  if(!name || !cfg || !cfg.conventions) return {};
+  const p = cfg.conventions[name] || {};
+  const out = {}; Object.entries(p).forEach(([k,v])=>{ if(k!=="type") out[k]=v; });
+  return out;
+}
+function fmtVal(v){
+  return (v && typeof v === "object") ? JSON.stringify(v) : String(v);
+}
+function insType(ins){ return ins.type || presetType(ins.convention) || ""; }
+
+/* Convenciones propias del instrumento (las que sobreescribe él mismo). */
+function ownConv(ins){
+  const out = {};
+  Object.entries(ins).forEach(([k,v])=>{ if(!INS_DATA_KEYS.includes(k)) out[k]=v; });
+  Object.entries(ins.conventions||{}).forEach(([k,v])=>{ out[k]=v; });
+  return out;
+}
+
+/* Lo que el instrumento HEREDA, con la capa de la que viene. Réplica en el
+   cliente de conventions.resolve(): curva < preset < instrumento. */
+function inheritedConv(ins){
+  const c = cfg.curves[selected] || {};
+  const out = {};
+  Object.entries(c.conventions||{}).forEach(([k,v])=> out[k]={value:v, source:"curve"});
+  Object.entries(presetConv(ins.convention)).forEach(([k,v])=> out[k]={value:v, source:"preset"});
+  Object.keys(ownConv(ins)).forEach(k=> delete out[k]);   // lo propio ya no es heredado
+  return out;
 }
 
 function insRow(ins,i){
-  const extras = Object.entries(ins).filter(([k])=>!["type","tenor","quote"].includes(k))
-    .map(([k,v])=>`${k}=${v}`).join(", ");
-  return `<tr data-i="${i}">
-    <td><select class="ins-type">${INSTRUMENT_TYPES.map(t=>
-      `<option ${t===ins.type?'selected':''}>${t}</option>`).join("")}</select></td>
-    <td><input class="ins-tenor" value="${ins.tenor}"></td>
-    <td class="num"><input class="ins-quote" value="${ins.quote}"></td>
-    <td><input class="ins-extra" value="${extras}" placeholder="—"></td>
+  const itype = insType(ins);
+  const isBond = itype === "sovereign_bond";
+  const own = ownConv(ins);
+  const nOwn = Object.keys(own).length;
+  const open = expandedIns.has(i);
+
+  /* Los bonos se identifican por vencimiento; el resto por tenor. */
+  const idCell = isBond
+    ? `<input class="ins-mat" value="${ins.maturity ?? ""}" placeholder="YYYY-MM-DD"
+        title="Vencimiento del bono: es el pilar de la curva">`
+    : `<input class="ins-tenor" value="${ins.tenor ?? ""}" placeholder="1Y">`;
+
+  /* Quote SIEMPRE con los tres lados: es el formato de la hoja de cotizaciones
+     (columnas BID/MID/ASK). Si solo se llena mid, se guarda como escalar. */
+  const q = ins.quote;
+  const qb = (q && typeof q==="object") ? (q.bid ?? "") : "";
+  const qm = (q && typeof q==="object") ? (q.mid ?? "") : (q ?? "");
+  const qa = (q && typeof q==="object") ? (q.ask ?? "") : "";
+  const unit = isBond ? "precio" : "tasa";
+
+  const presetOpts = Object.keys((cfg && cfg.conventions) || {});
+  const presetCell = `<select class="ins-preset"
+      title="Preset: paquete de convenciones con nombre, definido en el bloque conventions: del YAML. Se aplica a este instrumento y puede sobreescribirse abajo.">
+      <option value="">— ninguno —</option>
+      ${presetOpts.map(n=>`<option value="${n}" ${n===ins.convention?"selected":""}>${n}</option>`).join("")}
+    </select>`;
+
+  const main = `<tr class="ins-main" data-i="${i}">
+    <td><select class="ins-type" title="Tipo de instrumento (define qué convenciones aplican)">
+      ${instrumentTypes().map(t=>`<option ${t===itype?'selected':''}>${t}</option>`).join("")}</select></td>
+    <td>${idCell}</td>
+    <td><div class="q3">
+      <input class="q-bid" value="${qb}" placeholder="bid" title="Bid (${unit})">
+      <input class="q-mid" value="${qm}" placeholder="mid" title="Mid (${unit})">
+      <input class="q-ask" value="${qa}" placeholder="ask" title="Ask (${unit})">
+    </div></td>
+    <td>${presetCell}</td>
+    <td><button class="ins-gear ${open?'on':''}" data-i="${i}"
+        title="Configurar las convenciones de ESTE instrumento">
+      ${open?'▾':'▸'} ${open?'Configurando':'Configurar'}${nOwn?` · <span class="badge">${nOwn}</span>`:''}</button></td>
     <td><button class="row-del ins-del" aria-label="quitar fila">×</button></td></tr>`;
+
+  return main + insDetailRow(ins, i, itype, open);
+}
+
+/* Panel por instrumento: mismo estilo de selectores que las convenciones de
+   curva, pero acotado a las convenciones que ESTE tipo de instrumento usa. */
+function insDetailRow(ins, i, itype, open){
+  if(!open) return `<tr class="ins-detail" data-i="${i}" hidden><td colspan="6"></td></tr>`;
+
+  const own = ownConv(ins);
+  const inh = inheritedConv(ins);
+  const applicable = conventionsForType(itype);
+  const req = requiredForType(itype);
+
+  const ownRows = Object.entries(own)
+    .map(([k,v])=> insConvRow(k, v, itype, req.includes(k))).join("");
+
+  const missing = req.filter(k=> !(k in own) && !(k in inh));
+  const missingRows = missing.map(k=> insConvRow(k, "", itype, true)).join("");
+
+  const inhRows = Object.entries(inh)
+    .filter(([k])=> applicable.includes(k))
+    .sort((a,b)=> a[0].localeCompare(b[0]))
+    .map(([k,o])=>`<div class="inh-row">
+        <span class="k">${k}</span>
+        <span class="v" title="${fmtVal(o.value)}">${fmtVal(o.value)}</span>
+        <span class="src src-${o.source}">${o.source==="curve"?"curva":o.source}</span>
+        <button class="btn-ovr" data-i="${i}" data-k="${k}"
+          title="Fijar un valor propio para este instrumento">sobreescribir</button>
+      </div>`).join("");
+
+  const tickerRow = `<div class="inh-row" style="grid-template-columns:170px 1fr">
+      <span class="k">ticker</span>
+      <input class="ins-ticker" value="${ins.ticker ?? ""}" placeholder="referencia, ej. PERUGB 5.94 02/12/29"
+        title="Identificador de referencia. No entra al cálculo; sirve para emparejar la hoja de cotizaciones.">
+    </div>`;
+
+  return `<tr class="ins-detail" data-i="${i}"><td colspan="6"><div class="ins-panel">
+    <div class="sect">
+      <h4>Convenciones propias de este instrumento</h4>
+      <div class="ins-conv-rows" data-i="${i}">${ownRows}${missingRows}</div>
+      ${(!ownRows && !missingRows) ? `<div class="empty">Ninguna. Este instrumento usa todo lo heredado.</div>` : ""}
+      <div class="tbl-actions"><button class="btn-add-insconv" data-i="${i}">+ Convención</button></div>
+    </div>
+    <div class="sect">
+      <h4>Heredadas ${ins.convention?`· preset <b>${ins.convention}</b>`:""}</h4>
+      ${inhRows || `<div class="empty">Sin convenciones heredadas aplicables a este tipo.</div>`}
+    </div>
+    <div class="sect">
+      <h4>Referencia</h4>
+      ${tickerRow}
+    </div>
+    <div class="panel-foot">
+      <button class="btn-done" data-i="${i}"
+        title="Guardar y cerrar el panel de este instrumento">✓ Listo</button>
+      <span class="foot-hint">Los cambios se guardan al salir de cada campo.</span>
+    </div>
+  </div></td></tr>`;
+}
+
+/* Fila clave/valor del panel, con el catálogo filtrado por tipo. */
+function insConvRow(k, v, itype, isReq){
+  const val = Array.isArray(v) ? v.join(",") : String(v ?? "");
+  const meta = schema && schema[k];
+  const applicable = conventionsForType(itype);
+
+  let keyField;
+  if(schema && applicable.length){
+    keyField = `<select class="ic-k" aria-label="clave">
+      <option value="" ${k?"":"selected"}>— elegir —</option>
+      ${applicable.map(n=>`<option value="${n}" ${n===k?"selected":""}>${n}</option>`).join("")}
+      ${(k && !applicable.includes(k)) ? `<option value="${k}" selected>${k} (no aplica a ${itype})</option>` : ""}
+    </select>`;
+  } else {
+    keyField = `<input class="ic-k" value="${k}" aria-label="clave">`;
+  }
+
+  const tip = meta ? meta.description : "";
+  return `<div class="conv-row" title="${(tip||"").replace(/"/g,"&quot;")}">
+    ${keyField}<span class="ic-vwrap">${insConvValField(k, val)}</span>
+    ${isReq ? `<span class="req-tag" title="obligatoria para ${itype}">req</span>`
+            : `<button class="row-del ic-del" aria-label="quitar">×</button>`}
+  </div>`;
+}
+
+/* Control del VALOR, separado para poder reemplazarlo IN SITU cuando cambia la
+   clave, sin redibujar el panel entero. Ese redibujado era justo lo que hacía
+   desaparecer la fila recién creada: al elegir la clave el valor aún está
+   vacío, la fila no se guarda en la config, y el re-render la borraba. */
+function insConvValField(k, val){
+  const meta = schema && schema[k];
+  val = val ?? "";
+  if(meta && (meta.type==="enum" || meta.type==="bool")){
+    const values = meta.type==="bool" ? ["true","false"] : meta.values;
+    return `<select class="ic-v" aria-label="valor">
+      <option value="" ${val?"":"selected"}>— elegir —</option>
+      ${values.map(o=>`<option value="${o}" ${o===val?"selected":""}>${valueLabel(k,o)}</option>`).join("")}
+      ${(val && !values.includes(val)) ? `<option value="${val}" selected>${val}</option>` : ""}
+    </select>`;
+  }
+  if(meta && meta.suggestions && meta.suggestions.length){
+    const listId = `isug-${k}`;
+    return `<input class="ic-v" value="${val}" aria-label="valor" list="${listId}"
+        placeholder="${meta.default!==undefined?`default: ${meta.default}`:""}">
+      <datalist id="${listId}">${meta.suggestions.map(o=>
+        `<option value="${o}">${valueLabel(k,o)}</option>`).join("")}</datalist>`;
+  }
+  const ph = meta && meta.default !== undefined ? `default: ${meta.default}` : "";
+  return `<input class="ic-v" value="${val}" aria-label="valor" placeholder="${ph}">`;
 }
 
 /* ================================================== bindings editor */
@@ -1060,24 +1352,124 @@ function bindEditor(){
 
   // instrumentos
   const syncIns = ()=>{
-    const rows=document.querySelectorAll("#ins-body tr"); const out=[];
-    rows.forEach(r=>{
-      const ins={ type:r.querySelector(".ins-type").value,
-                  tenor:r.querySelector(".ins-tenor").value.trim(),
-                  quote:parseFloat(r.querySelector(".ins-quote").value)||0 };
-      const extra=r.querySelector(".ins-extra").value.trim();
-      if(extra) extra.split(",").forEach(pair=>{
-        const [k,...rest]=pair.split("="); const v=rest.join("=").trim();
-        if(k&&v!=="") ins[k.trim()] = (!isNaN(v)?parseFloat(v):v);
-      });
+    const out=[];
+    document.querySelectorAll("#ins-body tr.ins-main").forEach(r=>{
+      const i = +r.dataset.i;
+      const itype = r.querySelector(".ins-type").value.trim();
+      const ins = {};
+      /* El tipo se escribe SIEMPRE explícito: que dependa del preset hace
+         ilegible la tabla (era el "— del preset —" de antes). */
+      if(itype) ins.type = itype;
+
+      const presetSel = r.querySelector(".ins-preset");
+      const preset = presetSel ? presetSel.value.trim() : "";
+      if(preset) ins.convention = preset;
+
+      const matEl = r.querySelector(".ins-mat");
+      const tenEl = r.querySelector(".ins-tenor");
+      if(matEl && matEl.value.trim()) ins.maturity = matEl.value.trim();
+      if(tenEl && tenEl.value.trim()) ins.tenor = tenEl.value.trim();
+
+      ins.quote = readQuote(r);
+
+      /* Convenciones propias: se leen del panel de ESTE instrumento. Si el
+         panel está cerrado no se re-renderizó, así que se conservan las que
+         ya tenía el objeto. */
+      const panel = document.querySelector(`tr.ins-detail[data-i="${i}"] .ins-conv-rows`);
+      if(panel){
+        panel.querySelectorAll(".conv-row").forEach(row=>{
+          const k = row.querySelector(".ic-k").value.trim();
+          const v = row.querySelector(".ic-v").value.trim();
+          if(k && v!=="") ins[k] = parseScalar(v);
+        });
+        const tk = document.querySelector(`tr.ins-detail[data-i="${i}"] .ins-ticker`);
+        if(tk && tk.value.trim()) ins.ticker = tk.value.trim();
+      } else {
+        const prev = (c.instruments||[])[i] || {};
+        Object.entries(ownConv(prev)).forEach(([k,v])=> ins[k]=v);
+        if(prev.ticker) ins.ticker = prev.ticker;
+      }
       out.push(ins);
     });
     c.instruments=out;
-    document.querySelector(".card h3:last-of-type");
   };
-  document.querySelectorAll(".ins-type,.ins-tenor,.ins-quote,.ins-extra")
-    .forEach(i=> i.onchange=syncIns);
-  document.querySelectorAll(".ins-del").forEach(b=> b.onclick=()=>{ b.closest("tr").remove(); syncIns(); });
+
+  /* Lee los tres lados. Si solo hay mid, guarda un escalar (formato histórico
+     del YAML); si hay bid o ask, guarda {bid, mid, ask}. */
+  function readQuote(r){
+    const num = el => { const t=(el?el.value:"").trim(); return t==="" ? null : (parseFloat(t)); };
+    const b=num(r.querySelector(".q-bid")), m=num(r.querySelector(".q-mid")), a=num(r.querySelector(".q-ask"));
+    if(b===null && a===null) return m===null ? 0 : m;
+    const q={}; if(b!==null)q.bid=b; if(m!==null)q.mid=m; if(a!==null)q.ask=a;
+    return q;
+  }
+  function parseScalar(v){
+    if(v==="true") return true;
+    if(v==="false") return false;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;      // fecha: se deja string
+    return (!isNaN(v) && v.trim()!=="") ? parseFloat(v) : v;
+  }
+
+  /* Cambiar tipo o preset altera QUÉ convenciones aplican -> re-render.
+     El resto de campos solo sincroniza, para no perder el foco al escribir. */
+  document.querySelectorAll(".ins-type,.ins-preset").forEach(el=>
+    el.onchange=()=>{ syncIns(); renderEditor(); });
+  document.querySelectorAll(".ins-tenor,.ins-mat,.q-bid,.q-mid,.q-ask,.ins-ticker")
+    .forEach(el=> el.onchange=syncIns);
+  /* Al cambiar la CLAVE no se redibuja el panel: solo se reemplaza el control
+     del valor (un enum necesita <select>, un entero <input>). Redibujar acá
+     borraba la fila recién creada, porque una fila sin valor todavía no se
+     guarda en la config. */
+  document.querySelectorAll(".ic-k").forEach(el=> el.onchange=()=>{
+    const row = el.closest(".conv-row");
+    const wrap = row.querySelector(".ic-vwrap");
+    const k = el.value.trim();
+    wrap.innerHTML = insConvValField(k, "");
+    const meta = schema && schema[k];
+    row.title = (meta && meta.description) || "";
+    const v = wrap.querySelector(".ic-v");
+    if(v){ v.onchange = syncIns; v.focus(); }
+    syncIns();
+  });
+  document.querySelectorAll(".ic-v").forEach(el=> el.onchange=syncIns);
+
+  // abrir/cerrar el panel de convenciones de un instrumento
+  document.querySelectorAll(".ins-gear").forEach(b=> b.onclick=()=>{
+    const i=+b.dataset.i;
+    if(expandedIns.has(i)) expandedIns.delete(i); else expandedIns.add(i);
+    renderEditor();
+  });
+  // "sobreescribir": copia la heredada como propia para poder editarla
+  document.querySelectorAll(".btn-ovr").forEach(b=> b.onclick=()=>{
+    const i=+b.dataset.i, k=b.dataset.k;
+    const ins=(c.instruments||[])[i]; if(!ins) return;
+    const inh=inheritedConv(ins)[k];
+    ins[k] = inh ? inh.value : "";
+    renderEditor();
+  });
+  document.querySelectorAll(".btn-add-insconv").forEach(b=> b.onclick=()=>{
+    const i=+b.dataset.i;
+    const rows=document.querySelector(`tr.ins-detail[data-i="${i}"] .ins-conv-rows`);
+    if(!rows) return;
+    const itype=insType((c.instruments||[])[i]||{});
+    rows.insertAdjacentHTML("beforeend", insConvRow("", "", itype, false));
+    bindEditor();
+  });
+  document.querySelectorAll(".ic-del").forEach(b=> b.onclick=()=>{
+    b.closest(".conv-row").remove(); syncIns(); renderEditor();
+  });
+  // "✓ Listo": guarda y cierra el panel de ese instrumento
+  document.querySelectorAll(".btn-done").forEach(b=> b.onclick=()=>{
+    syncIns();
+    expandedIns.delete(+b.dataset.i);
+    renderEditor();
+  });
+  document.querySelectorAll(".ins-del").forEach(b=> b.onclick=()=>{
+    const i=+b.closest("tr").dataset.i;
+    (c.instruments||[]).splice(i,1);
+    expandedIns.clear();
+    renderEditor();
+  });
   $("#btn-add-ins").onclick=()=>{
     (c.instruments=c.instruments||[]).push({type:"ois_swap",tenor:"1Y",quote:0.03});
     renderEditor();
@@ -1136,14 +1528,47 @@ const QUOTE_PREFIX_MAP = {MM:"mm",DEPO:"mm",SWAP:"ois_swap",IRS:"ois_swap",
 function parseQuoteName(name){
   const parts = name.trim().split(".");
   const prefix = (parts[0]||"").toUpperCase();
-  let tenor=null, ccy=null, index=null;
+  let tenor=null, ccy=null, index=null, maturity=null;
   if(prefix==="MM"||prefix==="DEPO"){
     ccy=parts[1]; index=parts[2]; tenor=parts[3]||"ON";
   } else { tenor=parts[1]; ccy=parts[2]; index=parts[3]; }
-  return {prefix, type:QUOTE_PREFIX_MAP[prefix], tenor, ccy, index, raw:name.trim()};
+
+  /* Un bono no se identifica por tenor sino por VENCIMIENTO. Busca una fecha
+     en cualquier posición del nombre (Bond.PEN.TIBO.2029-02-12). Si aparece,
+     guarda en maturity y anula el tenor para que el emparejamiento use el
+     vencimiento, no el tenor — igual que el backend (parse_quote_name). */
+  for(const part of parts.slice(1)){
+    const d = parseDatePart(part||"");
+    if(d){ maturity=d; break; }
+  }
+
+  return {prefix, type:QUOTE_PREFIX_MAP[prefix], tenor: maturity?null:tenor,
+          ccy, index, maturity, raw:name.trim()};
 }
 
 function normTenor(v){ if(v===true)return"ON"; if(v===false)return"OFF"; return String(v).toUpperCase().trim(); }
+
+/* parseQuotesCSV — espejo del loader del backend.
+   REGLA CLAVE: las tasas se escalan por rateScale (4.25 -> 0.0425); los
+   precios de bonos NO se escalan (105.954 se queda en 105.954). Se detecta
+   por el prefijo del nombre (Bond/Bono/Govt) o por la columna Type
+   (Price/Precio/Clean/Dirty). Sin esta distinción, un precio de 105.954
+   multiplicado por 0.01 da 1.05954 y la curva da resultados absurdos. */
+const _PRICE_PREFIXES = new Set(["BOND","BONO","GOVT"]);
+const _PRICE_TYPES_COL = new Set(["PRICE","PRECIO","CLEAN","DIRTY","PX","CLEAN_PRICE","DIRTY_PRICE"]);
+const _ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const _US_DATE_RE  = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
+
+function parseDatePart(s){
+  let m = s.match(_ISO_DATE_RE);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(_US_DATE_RE);
+  if(m){
+    let yy=parseInt(m[3]); if(yy<100) yy += yy<70?2000:1900;
+    return `${yy}-${String(m[1]).padStart(2,"0")}-${String(m[2]).padStart(2,"0")}`;
+  }
+  return null;
+}
 
 function parseQuotesCSV(text, rateScale=0.01){
   const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
@@ -1151,25 +1576,57 @@ function parseQuotesCSV(text, rateScale=0.01){
   const headers = lines[0].split(",").map(h=>h.trim().toLowerCase());
   const idx = k => headers.indexOf(k);
   const iName = idx("quote name")>=0?idx("quote name"):(idx("quote_name")>=0?idx("quote_name"):idx("name"));
-  const iBid=idx("bid"), iMid=idx("mid"), iAsk=idx("ask");
+  const iBid=idx("bid"), iMid=idx("mid"), iAsk=idx("ask"), iType=idx("type");
+  const iMat=Math.max(idx("maturity"),idx("vencimiento"),idx("maturity_date"));
   const out=[];
   for(let r=1;r<lines.length;r++){
     const cells = lines[r].split(",");
-    const name = cells[iName]; if(!name) continue;
-    const num = i => { const v=(cells[i]||"").trim(); return v===""?null:parseFloat(v)*rateScale; };
+    const name = (cells[iName]||"").trim(); if(!name) continue;
+    const p = parseQuoteName(name);
+
+    // detectar si es precio
+    const colType = iType>=0 ? (cells[iType]||"").trim().toUpperCase() : "";
+    const isPrice = _PRICE_PREFIXES.has(p.prefix||"") || _PRICE_TYPES_COL.has(colType);
+    p.isPrice = isPrice;
+    const scale = isPrice ? 1.0 : rateScale;
+
+    // vencimiento explícito en columna
+    if(!p.maturity && iMat>=0){
+      const raw=(cells[iMat]||"").trim();
+      if(raw) p.maturity = parseDatePart(raw);
+    }
+
+    const num = i => { const v=(cells[i]||"").trim(); return v===""?null:parseFloat(v)*scale; };
     let bid=num(iBid), mid=num(iMid), ask=num(iAsk);
     if(mid==null) mid = bid!=null?bid:ask;
-    const p = parseQuoteName(name); p.bid=bid; p.mid=mid; p.ask=ask;
+    p.bid=bid; p.mid=mid; p.ask=ask;
     out.push(p);
   }
   return out;
 }
 
 function findCurveFor(rec){
+  /* Misma lógica de tokenización que el backend (find_curve en quotes_loader.py).
+     Divide los nombres de curva por _ para evitar falsos positivos: "TIBO"
+     no debe matchear "STIBOR". */
+  function tokens(name){ return new Set(name.toUpperCase().split(/[_\-]/)); }
   const names = Object.keys(cfg.curves);
-  for(const n of names){ const up=n.toUpperCase();
-    if(rec.ccy&&rec.index&&up.includes(rec.ccy)&&up.includes(rec.index)) return n; }
-  for(const n of names){ if(rec.index&&n.toUpperCase().includes(rec.index)) return n; }
+  const ccy = (rec.ccy||"").toUpperCase();
+  const idx = (rec.index||"").toUpperCase();
+  const hasMat = !!rec.maturity;
+
+  // ccy E index como tokens exactos (swaps/MM)
+  if(ccy && idx && !hasMat){
+    for(const n of names){ const t=tokens(n); if(t.has(ccy)&&t.has(idx)) return n; }
+  }
+  // solo ccy como token exacto (bonos o nombres sin índice)
+  if(ccy && (hasMat || !idx)){
+    for(const n of names){ if(tokens(n).has(ccy)) return n; }
+  }
+  // fallback: index como token exacto
+  if(idx && !hasMat){
+    for(const n of names){ if(tokens(n).has(idx)) return n; }
+  }
   return null;
 }
 
@@ -1180,8 +1637,21 @@ function applyQuotes(text){
     const cname = findCurveFor(rec);
     if(!cname){ notes.push("· sin curva destino: "+rec.raw); continue; }
     const insts = cfg.curves[cname].instruments||[];
-    const target = insts.find(i=>normTenor(i.tenor)===normTenor(rec.tenor));
-    if(!target){ notes.push(`· ${rec.raw} (tenor ${rec.tenor}) sin instrumento en ${cname}`); continue; }
+
+    let target = null;
+    if(rec.maturity){
+      // BONOS: emparejar por vencimiento (string ISO)
+      target = insts.find(i=> String(i.maturity||"").slice(0,10) === rec.maturity.slice(0,10));
+    } else {
+      // SWAPS / MM: emparejar por tenor
+      target = insts.find(i=> normTenor(i.tenor) === normTenor(rec.tenor));
+    }
+
+    if(!target){
+      const ident = rec.maturity ? `vencimiento ${rec.maturity}` : `tenor ${rec.tenor}`;
+      notes.push(`· ${rec.raw} (${ident}) sin instrumento en ${cname}`);
+      continue;
+    }
     target.quote = {bid:rec.bid, mid:rec.mid, ask:rec.ask};
     matched++;
   }

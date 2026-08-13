@@ -31,6 +31,25 @@
 #                                               'type'; no cambia pricing)
 #   accrual_convention:      excl_spread|incl_spread (default excl_spread,
 #                                               solo xccy_basis/tenor_basis)
+#
+# -----------------------------------------------------------------------------
+# CONVENCIONES POR INSTRUMENTO
+# -----------------------------------------------------------------------------
+# `conventions:` a nivel de curva son DEFAULTS de sus instrumentos. Cada
+# instrumento puede fijar la suya propia, y gana la más específica:
+#
+#     curva  <  preset (convention: <nombre>)  <  instrumento
+#
+# Así conviven en la MISMA curva un ois_swap que liquida T+2 (spot_lag) y un
+# bono que liquida T+1 (settlement_lag). Tres formas, combinables:
+#
+#   a) heredar de la curva:      - {type: ois_swap, tenor: 2Y, quote: 0.0445}
+#   b) referenciar un preset:    - {convention: bono_soberano_pen, maturity: ...}
+#   c) fijar en el instrumento:  - {type: ois_swap, tenor: 2Y, spot_lag: 1, ...}
+#
+# El bloque `conventions:` de la raíz (abajo) define los presets con nombre.
+# GET /conventions reporta la convención efectiva de cada instrumento y de
+# qué capa salió cada campo — la vista de auditoría para reconciliación.
 # =============================================================================
 
 valuation_date: 2026-07-02
@@ -49,6 +68,27 @@ market_data:
     USDCNH: 7.2000
     EURUSD: 1.0900
     GBPUSD: 1.2700
+
+# =============================================================================
+# PRESETS DE CONVENCIÓN (referenciables desde cualquier instrumento con
+# `convention: <nombre>`). Evitan repetir la misma convención en cada uno de
+# los bonos y dejan visible, en el diff, cuál se desvía del estándar.
+# =============================================================================
+conventions:
+
+  # Soberanos peruanos en soles — familia "Calc Type 1275" de Bloomberg.
+  # Day counts de pantalla DES: cupones 30/360, corrido ACT/ACT, precio
+  # ACT/360. Solo los dos primeros entran al bootstrap: el 30/360 dimensiona
+  # el cupón (semestral regular => cupón/2 exacto) y el ACT/ACT el corrido.
+  # El ACT/360 del precio solo se usaría para calibrar contra YIELD.
+  bono_soberano_pen:
+    type: sovereign_bond
+    coupon_freq: semiannual
+    redemption: 100.0
+    price_type: clean_price          # los quotes BGN son precio limpio
+    daycount_accrued: ACT/ACT_ISMA
+    settlement_lag: 1                # T+1: distinto del spot_lag T+2 del OIS
+    business_day_convention: F       # PENDIENTE confirmar con primera línea
 
 curves:
 
@@ -303,18 +343,87 @@ curves:
       - {type: ibor_swap, tenor: 20Y, quote: 0.0270}
 
   PEN_OIS_TIBO:
-    mode: sequential
+    # Tramo corto: TIBO + OIS PEN (liquidan T+2, heredado de la curva).
+    # Tramo largo (>2Y): NO hay OIS PEN líquido, así que se calibra con
+    # Soberanos en soles, que liquidan T+1 y traen sus propias convenciones
+    # vía el preset `bono_soberano_pen`. Es el caso que motiva la resolución de
+    # convenciones por instrumento.
+    #
+    # mode: global — el tramo largo está dominado por bonos y cada bono
+    # depende de TODOS los pilares previos vía sus cupones. En secuencial,
+    # los bonos con descuento profundo (2034, 2040) quedan con residual
+    # ~1e-3 por tolerancia del Brent sobre el log-DF; en global cierran a
+    # ~1e-14.
+    #
+    # ADVERTENCIA DE MODELO: al calibrar el tramo largo con soberanos, ese
+    # tramo deja de ser una curva OIS pura y pasa a incorporar riesgo
+    # soberano y prima de liquidez. Es práctica estándar en EM, pero la
+    # curva >2Y es, en rigor, la curva de gobierno peruana.
+    mode: global
     discount: self
     projection: self
     depends_on: []
     conventions: {calendar: PE, day_count: ACT/360, spot_lag: 2, fixed_freq: A}
     instruments:
-      - {type: ois_swap, tenor: 3M,  quote: 0.0430}
-      - {type: ois_swap, tenor: 6M,  quote: 0.0432}
-      - {type: ois_swap, tenor: 1Y,  quote: 0.0435}
-      - {type: ois_swap, tenor: 2Y,  quote: 0.0445}
-      - {type: ois_swap, tenor: 5Y,  quote: 0.0470}
-      - {type: ois_swap, tenor: 10Y, quote: 0.0500}
+      # --- ON: TIBO (PEIIEAVG). Tipo mm (depósito overnight).
+      #     Para tenor ON el engine arranca en valuation_date directamente
+      #     (no usa spot_lag), así que no necesita override de convención.
+      - type: mm
+        tenor: "ON"
+        quote: {bid: 0.0425, mid: 0.0425, ask: 0.0425}
+
+      # --- tramo corto: OIS PEN "At Maturity" (bullet, heredan fixed_freq:A
+      #     de la curva; short_end_payment_style: bullet por defecto en ois_swap).
+      #     Liquidan T+2 (spot_lag de la curva). Pay delay 0 en ambas patas.
+      - {type: ois_swap, tenor: 3M,  quote: {bid: 0.0428, mid: 0.0430, ask: 0.0432}}
+      - {type: ois_swap, tenor: 6M,  quote: {bid: 0.0430, mid: 0.0432, ask: 0.0434}}
+      - {type: ois_swap, tenor: 9M,  quote: {bid: 0.0432, mid: 0.0434, ask: 0.0436}}
+      - {type: ois_swap, tenor: 12M, quote: {bid: 0.0433, mid: 0.0435, ask: 0.0437}}
+      # 18M también es At Maturity, pero SUPERA 1Y y ahí está el detalle: la
+      # regla de bullet de ois_swap solo colapsa a pago único los tenores <=1Y
+      # (`tenor_years(tenor) <= 1.0` en _fixed_schedule). Sin override, el 18M
+      # hereda fixed_freq: A y paga DOS veces (verificado: 2027-01-06 y
+      # 2028-01-06). Se fuerza cupón cero con fixed_freq: Z.
+      - {type: ois_swap, tenor: 18M, fixed_freq: Z,
+         quote: {bid: 0.0433, mid: 0.0435, ask: 0.0437}}
+
+      # --- 24M: OIS PEN "SemiAnnual". Ambas patas con frecuencia semestral.
+      #     fixed_freq: S pisa el fixed_freq: A de la curva para ESTE instrumento.
+      #     Es el único OIS del tramo que no es At Maturity.
+      - type: ois_swap
+        tenor: 24M
+        fixed_freq: S
+        quote: {bid: 0.0443, mid: 0.0445, ask: 0.0447}
+      # --- tramo largo: Soberanos PEN, liquidan T+1 (preset bono_soberano_pen).
+      #     Quotes = precio limpio bid/mid/ask (BGN). NO son tasas: no se
+      #     escalan por rate_scale al cargarlos desde hoja.
+      - {convention: bono_soberano_pen, ticker: "PERUGB 5.94 02/12/29",
+         maturity: 2029-02-12, coupon: 5.94,
+         quote: {bid: 105.857, mid: 105.954, ask: 106.051}}
+      - {convention: bono_soberano_pen, ticker: "PERUGB 6.95 08/12/31",
+         maturity: 2031-08-12, coupon: 6.95,
+         quote: {bid: 114.439, mid: 114.555, ask: 114.671}}
+      - {convention: bono_soberano_pen, ticker: "PERUGB 6.15 08/12/32",
+         maturity: 2032-08-12, coupon: 6.15,
+         quote: {bid: 108.598, mid: 108.707, ask: 108.816}}
+      - {convention: bono_soberano_pen, ticker: "PERUGB 5.4 08/12/34",
+         maturity: 2034-08-12, coupon: 5.40,
+         quote: {bid: 97.785, mid: 97.873, ask: 97.960}}
+      - {convention: bono_soberano_pen, ticker: "PERUGB 6.9 08/12/37",
+         maturity: 2037-08-12, coupon: 6.90,
+         quote: {bid: 102.772, mid: 102.887, ask: 103.001}}
+      - {convention: bono_soberano_pen, ticker: "PERUGB 5.35 08/12/40",
+         maturity: 2040-08-12, coupon: 5.35,
+         quote: {bid: 87.494, mid: 87.620, ask: 87.745}}
+      # Los dos más largos tienen bid/ask muy ancho (~1.7-2 puntos) por
+      # iliquidez: las curvas bid y ask divergen de forma visible en el
+      # tramo >15Y. Es dato de mercado, no un error de carga.
+      - {convention: bono_soberano_pen, ticker: "PERUGB 6.85 02/12/42",
+         maturity: 2042-02-12, coupon: 6.85,
+         quote: {bid: 101.968, mid: 102.846, ask: 103.725}}
+      - {convention: bono_soberano_pen, ticker: "PERUGB 6.7142 02/12/55",
+         maturity: 2055-02-12, coupon: 6.7142,
+         quote: {bid: 101.752, mid: 102.810, ask: 103.869}}
 
   COP_OIS_IBR:
     mode: sequential
