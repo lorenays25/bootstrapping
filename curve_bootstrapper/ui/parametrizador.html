@@ -1573,14 +1573,17 @@ function parseDatePart(s){
 function parseQuotesCSV(text, rateScale=0.01){
   const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
   if(!lines.length) return [];
-  const headers = lines[0].split(",").map(h=>h.trim().toLowerCase());
+  // el delimitador varía según la fuente (',' o ';'); se detecta por la
+  // primera línea en vez de asumir coma, igual que csv.Sniffer en el backend.
+  const delim = (lines[0].split(";").length > lines[0].split(",").length) ? ";" : ",";
+  const headers = lines[0].split(delim).map(h=>h.trim().toLowerCase());
   const idx = k => headers.indexOf(k);
   const iName = idx("quote name")>=0?idx("quote name"):(idx("quote_name")>=0?idx("quote_name"):idx("name"));
   const iBid=idx("bid"), iMid=idx("mid"), iAsk=idx("ask"), iType=idx("type");
   const iMat=Math.max(idx("maturity"),idx("vencimiento"),idx("maturity_date"));
   const out=[];
   for(let r=1;r<lines.length;r++){
-    const cells = lines[r].split(",");
+    const cells = lines[r].split(delim);
     const name = (cells[iName]||"").trim(); if(!name) continue;
     const p = parseQuoteName(name);
 
@@ -1608,24 +1611,28 @@ function parseQuotesCSV(text, rateScale=0.01){
 function findCurveFor(rec){
   /* Misma lógica de tokenización que el backend (find_curve en quotes_loader.py).
      Divide los nombres de curva por _ para evitar falsos positivos: "TIBO"
-     no debe matchear "STIBOR". */
+     no debe matchear "STIBOR". El índice del quote se compara como
+     SUBCONJUNTO de tokens (no igualdad exacta): "F-TIIE" tokeniza a
+     {F, TIIE} y debe matchear MXN_F_TIIE, cuyos tokens son {MXN, F, TIIE}. */
   function tokens(name){ return new Set(name.toUpperCase().split(/[_\-]/)); }
+  function isSubset(sub, set){ for(const x of sub){ if(!set.has(x)) return false; } return true; }
   const names = Object.keys(cfg.curves);
   const ccy = (rec.ccy||"").toUpperCase();
   const idx = (rec.index||"").toUpperCase();
+  const idxTokens = tokens(idx);
   const hasMat = !!rec.maturity;
 
-  // ccy E index como tokens exactos (swaps/MM)
+  // ccy exacto + index como subconjunto de tokens (swaps/MM)
   if(ccy && idx && !hasMat){
-    for(const n of names){ const t=tokens(n); if(t.has(ccy)&&t.has(idx)) return n; }
+    for(const n of names){ const t=tokens(n); if(t.has(ccy)&&isSubset(idxTokens,t)) return n; }
   }
   // solo ccy como token exacto (bonos o nombres sin índice)
   if(ccy && (hasMat || !idx)){
     for(const n of names){ if(tokens(n).has(ccy)) return n; }
   }
-  // fallback: index como token exacto
+  // fallback: index como subconjunto de tokens
   if(idx && !hasMat){
-    for(const n of names){ if(tokens(n).has(idx)) return n; }
+    for(const n of names){ if(isSubset(idxTokens, tokens(n))) return n; }
   }
   return null;
 }
