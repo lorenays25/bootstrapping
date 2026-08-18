@@ -15,6 +15,7 @@ otra librería de fechas, solo cambias este archivo.
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 from typing import List
 
 import QuantLib as ql
@@ -82,6 +83,7 @@ def _period_from_freq(freq: str) -> ql.Period:
 # ---------------------------------------------------------------------------
 # Conversores date <-> QuantLib
 # ---------------------------------------------------------------------------
+@functools.lru_cache(maxsize=None)
 def to_ql(d: _dt.date) -> ql.Date:
     return ql.Date(d.day, d.month, d.year)
 
@@ -90,12 +92,14 @@ def from_ql(d: ql.Date) -> _dt.date:
     return _dt.date(d.year(), d.month(), d.dayOfMonth())
 
 
-def get_calendar(codes: str | List[str]) -> ql.Calendar:
-    """Devuelve el calendario. Acepta 'US' o ['US','PE'] (calendario conjunto)."""
-    if isinstance(codes, str):
-        codes = [codes]
+def _cal_key(codes: str | List[str]) -> tuple:
+    return (codes,) if isinstance(codes, str) else tuple(codes)
+
+
+@functools.lru_cache(maxsize=None)
+def _get_calendar_cached(codes_key: tuple) -> ql.Calendar:
     cals = []
-    for c in codes:
+    for c in codes_key:
         if c not in _CAL_FACTORY:
             raise KeyError(f"Calendario desconocido: {c}. Disponibles: {list(_CAL_FACTORY)}")
         cals.append(_CAL_FACTORY[c]())
@@ -107,6 +111,16 @@ def get_calendar(codes: str | List[str]) -> ql.Calendar:
     return joint
 
 
+def get_calendar(codes: str | List[str]) -> ql.Calendar:
+    """Devuelve el calendario. Acepta 'US' o ['US','PE'] (calendario conjunto).
+    Cacheado: los calendarios (feriados) son estáticos durante una corrida,
+    así que no tiene sentido reconstruir el objeto QuantLib en cada llamada
+    -- esto se llama decenas de miles de veces por build en curvas con
+    muchos instrumentos/pilares (p.ej. el solve simultáneo de un grupo)."""
+    return _get_calendar_cached(_cal_key(codes))
+
+
+@functools.lru_cache(maxsize=None)
 def get_day_counter(code: str) -> ql.DayCounter:
     if code not in _DC_FACTORY:
         raise KeyError(f"Day count desconocido: {code}. Disponibles: {list(_DC_FACTORY)}")
@@ -133,8 +147,12 @@ def business_day_convention_codes() -> List[str]:
 # ---------------------------------------------------------------------------
 # Operaciones de fechas
 # ---------------------------------------------------------------------------
+@functools.lru_cache(maxsize=None)
 def year_fraction(day_count: str, d1: _dt.date, d2: _dt.date) -> float:
-    """Fracción de año entre dos fechas según el day count."""
+    """Fracción de año entre dos fechas según el day count.
+    Cacheado: función pura de (day_count, d1, d2) -- en un solve simultáneo
+    (least_squares con Jacobiano numérico) las MISMAS parejas de fechas se
+    reevalúan cientos de veces por corrida."""
     return get_day_counter(day_count).yearFraction(to_ql(d1), to_ql(d2))
 
 
@@ -177,13 +195,21 @@ def spot_date(valuation_date: _dt.date, spot_lag: int, calendar_codes) -> _dt.da
     return from_ql(cal.advance(to_ql(valuation_date), spot_lag, ql.Days, ql.Following))
 
 
+@functools.lru_cache(maxsize=None)
+def _advance_business_days_cached(d: _dt.date, n: int, codes_key: tuple) -> _dt.date:
+    cal = _get_calendar_cached(codes_key)
+    return from_ql(cal.advance(to_ql(d), n, ql.Days, ql.Following))
+
+
 def advance_business_days(d: _dt.date, n: int, calendar_codes) -> _dt.date:
     """Avanza (n>0) o retrocede (n<0) n días HÁBILES exactos según `calendar_codes`.
     Usado para pay_delay_days (avanza, desde el fin de periodo hasta la fecha de
     pago real) y rate_cutoff_days (retrocede, para ubicar la fecha de corte del
-    fixing compuesto diario) de patas flotantes RFR/OIS."""
-    cal = get_calendar(calendar_codes)
-    return from_ql(cal.advance(to_ql(d), n, ql.Days, ql.Following))
+    fixing compuesto diario) de patas flotantes RFR/OIS.
+    Cacheado (función pura de fecha/n/calendario): en el solve simultáneo de
+    un grupo, cada evaluación del Jacobiano numérico repite las mismas
+    fechas de corte/pago miles de veces."""
+    return _advance_business_days_cached(d, n, _cal_key(calendar_codes))
 
 
 def tenor_years(tenor: str) -> float:
