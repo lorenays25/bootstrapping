@@ -117,16 +117,32 @@ lo que hace todo parametrizable.
 - **`sequential`**: instrumentos ordenados por madurez; para cada uno se
   agrega un nodo y se resuelve su log(DF) con Brent (bracket auto-expansivo).
   Al final hay un *repricing check*: si algún residual > 1e-8, lanza error.
-- **`global`**: todos los nodos como vector de incógnitas, resuelto con
-  `scipy.optimize.least_squares` (LM). Úsalo cuando los instrumentos tienen
-  dependencia cruzada entre pilares o solapamiento de tenores.
+- **`global`**: todos los nodos de UNA curva como vector de incógnitas,
+  resuelto con `scipy.optimize.least_squares` (LM). Úsalo cuando los
+  instrumentos tienen dependencia cruzada entre pilares o solapamiento de
+  tenores.
+- **`build_group`** (curvas con `group:`, ver §14): generaliza `global` a
+  **dos o más curvas con dependencia mutua** (p.ej. una descuenta con la
+  otra y viceversa — construcción simultánea / `DoubleGlobalM` de Calypso).
+  Concatena los nodos de TODAS las curvas del grupo en un solo vector de
+  incógnitas y resuelve UN `least_squares` sobre los residuales de TODOS
+  los instrumentos de TODAS las curvas del grupo. Antes del solve conjunto,
+  `_seed_group` calcula una semilla rápida por curva (bootstrap Brent
+  aislado, en el orden que resuelve primero las curvas que otras usan como
+  `projection`) — sin esto, `least_squares` arranca en DF=1 plano y tarda
+  órdenes de magnitud más para curvas de 10-30 años.
 
 La variable de optimización es log(DF) ⇒ positividad garantizada.
 
 ### 3.5 `orchestrator.py` — el DAG
 
 `topological_order` ordena las curvas según `depends_on` con detección de
-ciclos. `build_all` las construye en orden e imprime el progreso.
+ciclos — con una excepción: un ciclo cuyos nodos declaran TODOS el mismo
+`group:` no es un error (es la interdependencia mutua esperada de una
+construcción simultánea, ver §14). `build_steps` agrupa el orden plano en
+*pasos de construcción*: pasos de 1 curva (como siempre) o pasos de 2+
+curvas que comparten `group:` (se construyen juntas con `build_group`).
+`build_all` recorre los pasos e imprime el progreso.
 
 ---
 
@@ -258,10 +274,19 @@ market_data:
 curves:
   NOMBRE_CURVA:
     mode: sequential | global       # solver
+    group: NOMBRE_GRUPO             # opcional (ver §14): dos o más curvas
+                                     # con el mismo 'group' se resuelven
+                                     # JUNTAS (construcción simultánea) --
+                                     # requiere ≥2 curvas por grupo y
+                                     # habilita depends_on circular ENTRE
+                                     # ellas (p.ej. A descuenta con B y B
+                                     # proyecta con A)
     discount: self | OTRA_CURVA     # semántica de descuento
     projection: self | OTRA_CURVA   # curva de proyección de forwards
     other_leg: OTRA_CURVA           # (fx_forward) curva de la otra moneda
-    depends_on: [CURVA_A, ...]      # deben construirse antes (DAG)
+    depends_on: [CURVA_A, ...]      # deben construirse antes (DAG); si
+                                     # CURVA_A comparte el mismo 'group',
+                                     # el ciclo mutuo es válido (ver 'group')
     internal_day_count: ACT/365F    # coordenada temporal interna (opcional)
     conventions:                    # heredadas por todos los instrumentos
       calendar: US | [US, PE] | ... # o lista => calendario conjunto
@@ -291,7 +316,7 @@ curves:
 
 | Tipo | target (incógnita) | usa `projection` | usa `discount` | usa `other_leg` |
 |---|---|---|---|---|
-| ois_swap | la curva misma | — | self | — |
+| ois_swap | la curva misma | solo si `discount` ≠ `projection` (ver §14) | sí | — |
 | ibor_swap | proyección IBOR | — | sí (ESTR o self) | — |
 | fra / future | proyección IBOR (`target`) | — | — | — |
 | fx_forward | según `solve_for` | — | — | sí |
@@ -380,8 +405,9 @@ deliberadas y documentadas:
 | `No se pudo encerrar la raíz...` | Quote en unidades equivocadas (% en vez de decimal, factor de puntos mal) | Revisa unidades del quote |
 | `Dos instrumentos con el mismo pilar` | Dos tenores caen en la misma fecha ajustada | Elimina uno o usa `mode: global` |
 | `La curva 'X' no está construida todavía` | Falta declarar `depends_on` | Agrega la dependencia |
-| `Dependencia circular` | A depende de B y B de A | Rompe el ciclo o usa un solve global conjunto (mejora futura) |
-| `Repricing check falló` | El solver convergió a tolerancia insuficiente o hay inconsistencia entre instrumentos | Revisa quotes solapados; prueba `mode: global` |
+| `Dependencia circular` | A depende de B y B de A, y NO comparten `group:` | Rompe el ciclo, o si es una dependencia mutua real (p.ej. descuento/proyección cruzados) declara `group: MISMO_NOMBRE` en ambas — ver §14 (construcción simultánea) |
+| `El/los grupo(s) [...] solo tienen 1 curva` | `group:` puesto en una sola curva (probable typo) | `group` es para interdependencia entre ≥2 curvas; si es una curva sola, quita la key |
+| `Repricing check falló` | El solver convergió a tolerancia insuficiente o hay inconsistencia entre instrumentos | Revisa quotes solapados; prueba `mode: global` (o `group` si hay dependencia mutua, §14) |
 | `Falta el spot FX 'PAR'` | fx_pair sin spot en market_data | Agrega el spot |
 
 ---
@@ -578,3 +604,121 @@ ConfigError: 'USD_SOFR' aparece en depends_on pero no está definida en curves.
 ```
 
 Esto también aplica a bid/mid/ask: `build_bid_mid_ask(select_curves(cfg, [...]))`.
+
+---
+
+## 14. Curvas con dependencia mutua (construcción simultánea / `group:`)
+
+### 14.1 El problema
+
+Hasta la versión anterior, `depends_on` exigía un DAG estricto: toda
+dependencia debía resolverse en un solo sentido. Eso no alcanza para un
+caso real y documentado: dos curvas que se necesitan **mutuamente**.
+
+Ejemplo (curvas MXN, ver manual interno de construcción de curvas de
+derivados §6.4 "Construcción simultánea" y §8.1.11 "Curvas en MXN"; y el
+manual Calypso "Yield Curves Generation" §9.2-9.3, algoritmo
+`DoubleGlobalM` / *Multicurve Package*):
+
+- `MXN_F_TIIE` (TIIE fondeada, i.e. colateralizada en USD) se **descuenta**
+  con `MXN_X_SOFR` (la curva cross MXN vs. USD SOFR).
+- `MXN_X_SOFR` **proyecta** su pata flotante con `MXN_F_TIIE` (la TIIE
+  forward real).
+
+Ninguna de las dos puede construirse primero: `MXN_F_TIIE` necesita a
+`MXN_X_SOFR` para descontar sus swaps, y `MXN_X_SOFR` necesita a
+`MXN_F_TIIE` para proyectar su pata flotante. Es exactamente el patrón que
+Calypso resuelve con un `DoubleGlobalM`/"Multicurve Package": ambas curvas
+se resuelven **juntas**, en un solo sistema.
+
+### 14.2 La solución: `group:`
+
+Dos o más curvas que se necesitan mutuamente declaran el mismo `group:` en
+el YAML (además de `mode: global` y sus referencias cruzadas normales de
+`discount`/`projection`/`depends_on`):
+
+```yaml
+curves:
+  MXN_F_TIIE:
+    group: MXN_COLL_SOFR
+    mode: global
+    discount: MXN_X_SOFR      # descuenta con la curva cross
+    projection: self          # proyecta su propia TIIE forward
+    depends_on: [MXN_X_SOFR]
+    instruments: [...]
+
+  MXN_X_SOFR:
+    group: MXN_COLL_SOFR       # MISMO grupo -> se resuelven juntas
+    mode: global
+    discount: self
+    projection: MXN_F_TIIE     # proyecta con la TIIE forward real
+    other_leg: USD_SOFR
+    depends_on: [USD_SOFR, MXN_F_TIIE]
+    instruments: [...]
+```
+
+Con esto:
+
+1. `topological_order` detecta el ciclo `MXN_F_TIIE -> MXN_X_SOFR ->
+   MXN_F_TIIE` pero, como TODOS los nodos del ciclo comparten el mismo
+   `group`, lo permite en vez de lanzar `ConfigError`. Un ciclo que
+   involucre una curva fuera del grupo (o sin `group` declarado) sigue
+   siendo un error de configuración — la validación de ciclos normal no se
+   relajó, solo se hizo una excepción explícita para este caso.
+2. `build_steps` agrupa `MXN_F_TIIE` y `MXN_X_SOFR` en UN solo paso de
+   construcción (en vez de dos pasos secuenciales imposibles de ordenar).
+3. `BootstrapEngine.build_group` construye ambas curvas en un solo
+   `least_squares`: concatena los nodos (log DF) de las dos curvas en un
+   vector de incógnitas y resuelve sobre el vector combinado de residuales
+   de TODOS los instrumentos de ambas curvas. Al terminar, cada curva pasa
+   su propio *repricing check* (tolerancia 1e-8) por separado.
+4. `_seed_group` da un punto de partida rápido y cercano a la solución:
+   siembra cada curva del grupo con un bootstrap Brent aislado (asumiendo,
+   solo para la semilla, `discount = projection = self` — la aproximación
+   estándar de Calypso), en el orden que resuelve primero las curvas que
+   otras usan como `projection` (para que esa referencia sea una curva
+   real y estable, no una auto-referencia). Sin esta semilla, el solve
+   conjunto arranca en DF=1 plano y puede tardar decenas de segundos en
+   curvas de 10-30 años; con ella, `least_squares` converge en 1-2
+   iteraciones reales.
+
+`group` se valida: declararlo en una sola curva (sin pareja) lanza
+`ConfigError` de inmediato (`_validate_groups`), porque casi siempre es un
+typo — `group` existe específicamente para modelar dependencia mutua entre
+2+ curvas.
+
+### 14.3 Cambio necesario en `OISSwap` para que esto funcione
+
+`MXN_F_TIIE` usa instrumentos `ois_swap`. Antes, `OISSwap.model_quote()`
+asumía siempre `discount == projection` (self-discounting) y solo miraba
+una curva. Se generalizó para tomar `discount` y `projection` por
+separado: si son la misma curva, el comportamiento (y el resultado
+numérico) es **idéntico al de antes** — el atajo telescópico
+`DF(t0) − DF(T)` se sigue usando; si son curvas distintas (como
+`MXN_F_TIIE`, que descuenta con `MXN_X_SOFR` pero proyecta consigo misma),
+se usa el desarrollo por período con la pata flotante proyectada en `p` y
+descontada en `c`. Las 26+ curvas existentes que usan `ois_swap` con
+descuento propio no cambian su resultado (verificado: la suite de tests
+completa reprecia igual antes y después, ver `tests/`).
+
+### 14.4 Rendimiento
+
+El caché de `dates.py` (`to_ql`, `get_calendar`, `get_day_counter`,
+`year_fraction`, `advance_business_days` — todas funciones puras de
+fecha/calendario, memoizadas con `functools.lru_cache`) más la semilla de
+`_seed_group` dejan el build completo de las 29 curvas en ~2.5s (antes:
+~4s con 27 curvas, sin el grupo MXN). El grupo MXN aislado (+ `USD_SOFR`)
+construye en ~2s. Ver `tests/test_conventions_and_bonds.py` sección 9 para
+el test de performance (umbral 10s, generoso para no ser frágil en CI).
+
+### 14.5 Puntos abiertos (no cerrados en este cambio)
+
+- Los quotes de `MXN_X_SOFR` (basis XCCY a 2Y-10Y) siguen siendo
+  **ficticios** (marcados `DATOS DE EJEMPLO` en el YAML) — reemplazar con
+  datos reales (p.ej. tickers MPBS) antes de usar en validación real.
+- No se distingue `DoubleGlobalM` de `DoubleGlobalSingle` de Calypso (ver
+  hallazgo en el doc de metodología del proyecto de validación) — este
+  motor siempre resuelve el grupo completo junto, que corresponde a
+  `DoubleGlobalM`.
+- `xccy_basis` asume notional constante (sin resets MtM), documentado ya
+  en §8, punto 3.
