@@ -9,7 +9,8 @@ from .curve import Curve
 from .engine import BootstrapEngine, BootstrapError
 from .instruments import CurveContext, INSTRUMENT_TYPES
 from .orchestrator import (build_all, build_bid_mid_ask, build_from_file,
-                           CurveSet, load_config, select_curves)
+                           build_steps, CurveSet, load_config, select_curves,
+                           topological_order)
 from .quotes_loader import apply_quotes_sheet, parse_quotes_csv
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "CurveContext", "INSTRUMENT_TYPES",
     "build_all", "build_from_file", "build_bid_mid_ask", "CurveSet",
     "load_config", "select_curves", "apply_quotes_sheet", "parse_quotes_csv",
+    "build_steps", "topological_order",
 ]
 __version__ = "0.1.0"

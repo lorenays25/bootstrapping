@@ -231,14 +231,27 @@ curves:
 
   MXN_F_TIIE:
     # OIS sobre F-TIIE (referencia RFR-style que reemplaza al panel IBOR
-    # TIIE 28D tradicional). Self-discounting. Convenciones tomadas de
-    # pantalla Bloomberg para el swap MXN 28D vs F-TIIE.
+    # TIIE 28D tradicional). Convenciones tomadas de pantalla Bloomberg
+    # para el swap MXN 28D vs F-TIIE.
     # spot_lag=2 (Settlement: T+2 Days en Bloomberg) -- distinto del T+1
     # de MXN_TIIE_28D, no copiar ese default.
-    mode: sequential
-    discount: self
+    #
+    # discount: MXN_X_SOFR (NO 'self'). Las cotizaciones de los swaps MXN
+    # F-TIIE están colateralizadas en USD (manual BCP "Construcción de
+    # Curvas Derivados", notas 41/42, §8.1.11): la pata flotante se
+    # PROYECTA con esta misma curva (projection: self) pero se DESCUENTA
+    # con la curva cross MXN_X_SOFR. Y MXN_X_SOFR, a su vez, proyecta su
+    # pata doméstica con esta curva (ver MXN_X_SOFR.projection más abajo)
+    # -> dependencia mutua. 'group' declara esa interdependencia: el
+    # orquestador resuelve ambas curvas en un solo sistema simultáneo
+    # (BootstrapEngine.build_group), equivalente al 'Multicurve Package'
+    # / DoubleGlobalM de Calypso, o a "construcción simultánea" del
+    # manual BCP §6.4. 'mode' no aplica a curvas agrupadas (el grupo
+    # siempre resuelve con el algoritmo global/simultáneo).
+    group: MXN_COLL_SOFR
+    discount: MXN_X_SOFR
     projection: self
-    depends_on: []
+    depends_on: [MXN_X_SOFR]
     conventions:
       calendar: MX
       day_count: ACT/360
@@ -549,23 +562,37 @@ curves:
       - {type: xccy_fixed_float, tenor: 10Y, quote: 0.1060}
 
   MXN_X_SOFR:
-    mode: sequential
+    # Curva cross MXN colateralizada en USD SOFR ("MXN coll. USD SOFR" /
+    # "Cross MXN vs USD" del manual BCP §8.1.11). discount: self porque la
+    # curva se autodescuenta (estándar para una curva cross: descuenta su
+    # propia pata doméstica, ver XCCYBasis.model_quote). projection:
+    # MXN_F_TIIE (NO 'self') porque el instrumento de mercado real es un
+    # "XCCY Basis Swap USD SOFR vs MXN F-TIIE" (tickers Bloomberg MPBS,
+    # basis entre DOS patas flotantes) -- no un fixed-vs-float. La pata
+    # doméstica de ese basis se proyecta con la curva F-TIIE, que a su vez
+    # descuenta con ESTA curva -> dependencia mutua, ver 'group' en
+    # MXN_F_TIIE arriba y BootstrapEngine.build_group.
+    group: MXN_COLL_SOFR
     discount: self
-    projection: self
+    projection: MXN_F_TIIE
     other_leg: USD_SOFR
-    depends_on: [USD_SOFR]
+    depends_on: [USD_SOFR, MXN_F_TIIE]
     conventions: {calendar: [US, MX], day_count: ACT/360, spot_lag: 2,
-                  fixed_freq: S, fx_pair: USDMXN, solve_for: quote_ccy,
+                  float_freq: Q, fx_pair: USDMXN, solve_for: quote_ccy,
                   points_factor: 10000}
     instruments:
       - {type: fx_forward, tenor: 1M, quote: 663}
       - {type: fx_forward, tenor: 3M, quote: 2000}
       - {type: fx_forward, tenor: 6M, quote: 4050}
       - {type: fx_forward, tenor: 1Y, quote: 8300}
-      - {type: xccy_fixed_float, tenor: 2Y,  quote: 0.0775}
-      - {type: xccy_fixed_float, tenor: 3Y,  quote: 0.0765}
-      - {type: xccy_fixed_float, tenor: 5Y,  quote: 0.0758}
-      - {type: xccy_fixed_float, tenor: 10Y, quote: 0.0768}
+      # DATOS DE EJEMPLO (ficticios, ver cabecera del archivo): basis en
+      # DECIMAL (spread sobre la pata SOFR), no tasa fija. Reemplazar con
+      # quotes reales de los tickers MPBS *BGN Curncy (manual BCP, pág.
+      # 136) antes de usar esta curva para valorización real.
+      - {type: xccy_basis, tenor: 2Y,  quote: -0.0055}
+      - {type: xccy_basis, tenor: 3Y,  quote: -0.0060}
+      - {type: xccy_basis, tenor: 5Y,  quote: -0.0065}
+      - {type: xccy_basis, tenor: 10Y, quote: -0.0070}
 
   EUR_X_USD:
     mode: sequential

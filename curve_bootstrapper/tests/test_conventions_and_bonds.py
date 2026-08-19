@@ -8,16 +8,19 @@ Correr:  python3 tests/test_conventions_and_bonds.py
 import datetime as _dt
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from curvelib import conventions as conv
+from curvelib.engine import BootstrapError
 from curvelib.instruments import (CONVENTION_SCHEMA, REQUIRED_BY_TYPE,
                                   CurveContext, conventions_for_type,
                                   make_instrument,
                                   resolve_instrument_conventions)
-from curvelib.orchestrator import (build_all, build_bid_mid_ask, load_config,
-                                   convention_report)
+from curvelib.orchestrator import (ConfigError, build_all, build_bid_mid_ask,
+                                   build_steps, load_config, select_curves,
+                                   topological_order, convention_report)
 from curvelib.quotes_loader import apply_quotes_sheet, parse_quotes_csv
 
 OK, FAIL = [], []
@@ -353,6 +356,102 @@ for sp in pen_spec["instruments"]:
     worst_r = max(worst_r, abs(ins.residual(ctx_r)))
 check(worst_r < 1e-10, "la curva PEN completa reprecia todos sus quotes",
       f"{len(pen_c.pillar_dates)} pilares, residual máx {worst_r:.2e}")
+
+
+# ---------------------------------------------------------------------------
+print("\n9) CURVAS MXN — CONSTRUCCIÓN SIMULTÁNEA (MXN_F_TIIE <-> MXN_X_SOFR)")
+print("   (dependencia mutua real: MXN_F_TIIE descuenta con MXN_X_SOFR, "
+      "MXN_X_SOFR proyecta con MXN_F_TIIE -- ver manual BCP §6.4 / §8.1.11)")
+
+cfg_full = load_config(os.path.join(os.path.dirname(__file__), "..", "config", "curves.yaml"))
+
+# a) el YAML declara el grupo esperado y build_steps lo detecta como UN
+#    paso simultáneo de 2 curvas (no dos pasos secuenciales, no error).
+steps = build_steps(cfg_full["curves"])
+mxn_steps = [s for s in steps if set(s) & {"MXN_F_TIIE", "MXN_X_SOFR"}]
+check(len(mxn_steps) == 1 and set(mxn_steps[0]) == {"MXN_F_TIIE", "MXN_X_SOFR"},
+      "MXN_F_TIIE y MXN_X_SOFR se resuelven en UN solo paso simultáneo (group:)",
+      f"pasos encontrados: {mxn_steps}")
+
+# b) build aislado del grupo (+ dependencias, i.e. USD_SOFR) reprecia
+#    ambas curvas dentro de tolerancia y no se cae con ConfigError/BootstrapError.
+sub_mxn = select_curves(cfg_full, ["MXN_F_TIIE", "MXN_X_SOFR"])
+t0 = time.time()
+try:
+    curves_mxn = build_all(sub_mxn, verbose=False)
+    build_ok, build_err = True, ""
+except (BootstrapError, ConfigError) as e:
+    curves_mxn, build_ok, build_err = {}, False, str(e)
+elapsed_mxn = time.time() - t0
+check(build_ok, "el grupo MXN (+ USD_SOFR) construye sin error", build_err)
+
+# build_all ya corre _check(tol=1e-8) internamente por curva -- si b) pasó,
+# ambas curvas ya repreciaron sus propios quotes dentro de 1e-8. Estas dos
+# aserciones lo dejan explícito y a la vista en el reporte.
+check(build_ok and "MXN_F_TIIE" in curves_mxn,
+      "MXN_F_TIIE se construyó y quedó en el resultado")
+check(build_ok and "MXN_X_SOFR" in curves_mxn,
+      "MXN_X_SOFR se construyó y quedó en el resultado")
+
+# c) performance: con la semilla Gauss-Seidel (_seed_group) + cacheo de
+#    fechas/calendarios en dates.py, el grupo MXN aislado no debería tardar
+#    ni cerca de los ~33s observados con el seed en bloque (bug corregido).
+#    Umbral generoso (10s) para no ser frágil en máquinas lentas / CI.
+check(build_ok and elapsed_mxn < 10.0,
+      "el build del grupo MXN es rápido (semilla Gauss-Seidel, no DF=1 plano)",
+      f"{elapsed_mxn:.2f}s")
+
+# d) 'group' con un solo miembro es (casi siempre) un typo -> ConfigError.
+bad_cfg = {
+    "SOLO_EN_SU_GRUPO": {
+        "group": "HUERFANO", "mode": "global", "discount": "self",
+        "projection": "self", "depends_on": [],
+        "instruments": [{"type": "mm", "tenor": "3M", "quote": 0.05}],
+    },
+}
+try:
+    topological_order(bad_cfg)
+    lonely_raised = False
+except ConfigError:
+    lonely_raised = True
+check(lonely_raised,
+      "'group' declarado en una sola curva levanta ConfigError (probable typo)")
+
+# e) un ciclo real de depends_on ENTRE curvas de distinto grupo (o sin
+#    grupo) NO debe tolerarse -- solo el ciclo intra-grupo declarado es
+#    válido. Verifica que no relajamos la detección de ciclos de más.
+cyc_cfg = {
+    "A": {"group": "G1", "depends_on": ["B"],
+          "instruments": [{"type": "mm", "tenor": "3M", "quote": 0.05}]},
+    "B": {"group": "G1", "depends_on": ["C"],
+          "instruments": [{"type": "mm", "tenor": "3M", "quote": 0.05}]},
+    "C": {"depends_on": ["A"],
+          "instruments": [{"type": "mm", "tenor": "3M", "quote": 0.05}]},
+}
+try:
+    topological_order(cyc_cfg)
+    cross_group_cycle_raised = False
+except ConfigError:
+    cross_group_cycle_raised = True
+check(cross_group_cycle_raised,
+      "un ciclo que involucra una curva FUERA del grupo declarado sigue "
+      "siendo un ConfigError (no se relajó de más la detección de ciclos)")
+
+# f) el ciclo intra-grupo (A<->B, ambas 'group: G1', sin curva externa en
+#    el ciclo) sí debe tolerarse y devolver un orden válido.
+ok_cyc_cfg = {
+    "A": {"group": "G1", "depends_on": ["B"],
+          "instruments": [{"type": "mm", "tenor": "3M", "quote": 0.05}]},
+    "B": {"group": "G1", "depends_on": ["A"],
+          "instruments": [{"type": "mm", "tenor": "3M", "quote": 0.05}]},
+}
+try:
+    order_ok = topological_order(ok_cyc_cfg)
+    intra_group_ok = set(order_ok) == {"A", "B"}
+except ConfigError:
+    intra_group_ok = False
+check(intra_group_ok,
+      "el ciclo intra-grupo declarado (A<->B, mismo 'group') SÍ se tolera")
 
 
 # ---------------------------------------------------------------------------

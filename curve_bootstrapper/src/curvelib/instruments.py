@@ -227,23 +227,38 @@ class OISSwap(Instrument):
         self.fixed_dates = self._fixed_schedule()
 
     def model_quote(self, ctx: CurveContext) -> float:
-        c = ctx.curve(self.curve_names["discount"])   # = target (self-discounting)
+        c = ctx.curve(self.curve_names["discount"])    # descuento (= target si self-discounting)
+        p = ctx.curve(self.curve_names["projection"])  # proyección de la pata flotante
+        # Caso normal (26/28 curvas del sistema): discount es la misma curva
+        # que projection (self-discounting). El atajo telescópico exacto y
+        # la descomposición de abajo colapsan a fórmulas idénticas en ese
+        # caso porque c y p son EL MISMO objeto -- cero cambio de
+        # comportamiento para esas curvas.
+        #
+        # Caso dual-curve (p.ej. MXN F-TIIE, descontada con la curva cross
+        # coll. USD SOFR vía 'discount: <otra curva>' en el YAML): discount
+        # y projection son curvas DISTINTAS. La pata flotante se proyecta
+        # con 'p' (su propio índice) y se descuenta con 'c' -- el mismo
+        # patrón dual-curve que ya usan IBORSwap/XCCYBasis/TenorBasisSwap.
+        same_curve = c is p
         dc = self.conv.get("day_count", "ACT/360")
         ann = self._annuity(c, self.fixed_dates, self.start_date, dc)
         cutoff = int(self.conv.get("rate_cutoff_days", 0))
         # El atajo telescópico aplica al NUMERADOR (pata flotante): solo
         # depende del delay de esa pata. El de la pata fija ya está dentro
-        # de `ann`, así que no condiciona este camino.
+        # de `ann`, así que no condiciona este camino. Solo es válido si
+        # projection == discount (telescopia porque la MISMA curva compone
+        # y descuenta); si son distintas, se necesita la descomposición.
         pay_delay = self._pay_delay("float")
-        if cutoff == 0 and pay_delay == 0:
+        if cutoff == 0 and pay_delay == 0 and same_curve:
             # atajo telescópico exacto (comportamiento actual, sin cambios)
             return (c.df(self.start_date) - c.df(self.pillar_date)) / ann
-        # descomposición por periodo: requerida si hay cutoff y/o pay delay.
-        # Por cada cupón, factor = compounding real hasta la fecha de corte
-        # (c_end) × (1 + tasa congelada en c_end · τ de la cola congelada).
-        # Con cutoff=0 esto colapsa a factor=DF(prev)/DF(accrual_end), y con
-        # pay_delay=0 el descuento cae en accrual_end — ambos casos reducen
-        # exactamente a la identidad telescópica de arriba (ver tests).
+        # descomposición por periodo: requerida si hay cutoff, pay delay, o
+        # discount != projection. Por cada cupón, factor = compounding real
+        # (proyectado con 'p') hasta la fecha de corte (c_end) × (1 + tasa
+        # congelada en c_end · τ de la cola congelada). Se descuenta con 'c'.
+        # Con cutoff=0, pay_delay=0 y c is p, esto colapsa exactamente a la
+        # identidad telescópica de arriba (ver tests).
         cal = self.conv.get("calendar", "WEEKENDS")
         num, prev = 0.0, self.start_date
         for accrual_end in self.fixed_dates:
@@ -253,12 +268,12 @@ class OISSwap(Instrument):
                 c_end = dt.advance_business_days(accrual_end, -cutoff, cal)
                 c_end = max(c_end, prev)   # guarda contra cutoff >= periodo
                 one_bd = dt.advance_business_days(c_end, 1, cal)
-                fwd_cutoff = c.fwd(c_end, one_bd, dc)          # tasa que se congela
+                fwd_cutoff = p.fwd(c_end, one_bd, dc)          # tasa que se congela (proyección)
                 tau_tail = dt.year_fraction(dc, c_end, accrual_end)
-                factor = (c.df(prev) / c.df(c_end)) * (1.0 + fwd_cutoff * tau_tail)
+                factor = (p.df(prev) / p.df(c_end)) * (1.0 + fwd_cutoff * tau_tail)
             else:
-                factor = c.df(prev) / c.df(accrual_end)
-            num += (factor - 1.0) * c.df(pay_date)
+                factor = p.df(prev) / p.df(accrual_end)
+            num += (factor - 1.0) * c.df(pay_date)   # descuento con 'c', siempre
             prev = accrual_end
         return num / ann
 

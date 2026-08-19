@@ -28,7 +28,7 @@ import yaml
 
 from .curve import Curve
 from .engine import BootstrapEngine
-from .instruments import CurveContext, make_instrument
+from .instruments import CurveContext, Instrument, make_instrument
 
 
 class ConfigError(ValueError):
@@ -45,9 +45,39 @@ def load_config(path: str) -> dict:
     return cfg
 
 
+def _validate_groups(curves_cfg: dict) -> None:
+    """Un 'group' declarado en una sola curva es casi siempre un typo (el
+    grupo existe para modelar interdependencia MUTUA -- necesita ≥2
+    miembros). Falla rápido en vez de dejar pasar una config a medio
+    escribir."""
+    from collections import Counter
+    counts = Counter(
+        cfg.get("group") for cfg in curves_cfg.values() if cfg.get("group")
+    )
+    lonely = [g for g, n in counts.items() if n < 2]
+    if lonely:
+        raise ConfigError(
+            f"El/los grupo(s) {lonely} solo tienen 1 curva. 'group' es para "
+            f"interdependencia simultánea entre ≥2 curvas (ver mode: global "
+            f"+ group en el YAML) -- si es una sola curva, quita la key 'group'."
+        )
+
+
 def topological_order(curves_cfg: dict) -> List[str]:
-    """Ordena las curvas de modo que toda dependencia se construya antes."""
+    """Ordena las curvas de modo que toda dependencia se construya antes.
+
+    Dos o más curvas pueden declarar el mismo 'group' en el YAML para
+    modelar una interdependencia MUTUA y esperada (p.ej. MXN_F_TIIE
+    descuenta con MXN_X_SOFR, y MXN_X_SOFR proyecta con MXN_F_TIIE -- ver
+    manual BCP §6.4 'Construcción simultánea' / Calypso DoubleGlobalM).
+    Un ciclo de depends_on cuyos nodos pertenecen TODOS al mismo grupo
+    declarado no es un error: se corta la recursión ahí (el grupo se
+    resuelve junto, ver build_steps/BootstrapEngine.build_group). Un ciclo
+    que involucra curvas de distinto grupo (o sin grupo) sigue siendo un
+    error de configuración."""
+    _validate_groups(curves_cfg)
     order, state = [], {}  # state: 0 sin visitar, 1 en proceso, 2 listo
+    group_of = {n: cfg.get("group") for n, cfg in curves_cfg.items()}
 
     def visit(name: str, chain=()):
         if name not in curves_cfg:
@@ -59,6 +89,11 @@ def topological_order(curves_cfg: dict) -> List[str]:
         if s == 2:
             return
         if s == 1:
+            cyc_start = chain.index(name) if name in chain else len(chain)
+            cycle_names = chain[cyc_start:] + (name,)
+            groups_in_cycle = {group_of.get(n) for n in cycle_names}
+            if len(groups_in_cycle) == 1 and None not in groups_in_cycle:
+                return  # ciclo interno de un grupo declarado: esperado, no es error
             raise ConfigError(f"Dependencia circular: {' -> '.join(chain + (name,))}")
         state[name] = 1
         for dep in curves_cfg[name].get("depends_on", []) or []:
@@ -69,6 +104,33 @@ def topological_order(curves_cfg: dict) -> List[str]:
     for name in curves_cfg:
         visit(name)
     return order
+
+
+def build_steps(curves_cfg: dict) -> List[List[str]]:
+    """Como topological_order, pero devuelve PASOS DE CONSTRUCCIÓN: cada
+    paso es una lista de 1 o más nombres de curva. Un paso de 1 curva se
+    construye como hoy (sequential/global de esa curva sola). Un paso de
+    2+ curvas es un grupo declarado con 'group:' -- se construye con
+    BootstrapEngine.build_group (solve simultáneo, ver ese método).
+
+    El orden de los pasos respeta 'depends_on' externo al grupo: por
+    construcción de topological_order, cuando el primer miembro de un
+    grupo aparece en el orden plano, todas las dependencias EXTERNAS de
+    TODOS los miembros del grupo ya fueron visitadas (cualquier miembro
+    arrastra, transitivamente, las dependencias de los demás miembros vía
+    el propio ciclo intra-grupo)."""
+    flat_order = topological_order(curves_cfg)
+    emitted_groups = set()
+    steps: List[List[str]] = []
+    for name in flat_order:
+        g = curves_cfg[name].get("group")
+        if g is None:
+            steps.append([name])
+        elif g not in emitted_groups:
+            emitted_groups.add(g)
+            members = [n for n in curves_cfg if curves_cfg[n].get("group") == g]
+            steps.append(members)
+    return steps
 
 
 def _collect_dependencies(curves_cfg: dict, wanted: List[str]) -> List[str]:
@@ -137,15 +199,22 @@ def build_all(config: dict, verbose: bool = True, side: str = "mid") -> Dict[str
     conv_warnings: List[str] = []
 
     curves_cfg = config["curves"]
-    order = topological_order(curves_cfg)
+    steps = build_steps(curves_cfg)
     if verbose:
+        flat = [n for step in steps for n in step]
         print(f"Fecha de valuación: {val_date}   |   lado: {side}")
-        print(f"Orden de construcción ({len(order)} curvas):")
-        for i, n in enumerate(order, 1):
-            print(f"  {i:>2}. {n}")
+        print(f"Orden de construcción ({len(flat)} curvas, {len(steps)} pasos):")
+        i = 1
+        for step in steps:
+            if len(step) == 1:
+                print(f"  {i:>2}. {step[0]}")
+                i += 1
+            else:
+                print(f"  {i:>2}. [grupo simultáneo] {', '.join(step)}")
+                i += len(step)
         print()
 
-    for name in order:
+    def _instruments_for(name: str) -> List[Instrument]:
         spec = curves_cfg[name]
         conv = dict(spec.get("conventions", {}) or {})
         curve_names = {
@@ -161,16 +230,31 @@ def build_all(config: dict, verbose: bool = True, side: str = "mid") -> Dict[str
         if not instruments:
             raise ConfigError(f"[{name}] no tiene instrumentos definidos.")
         conv_warnings.extend(f"[{name}] {w}" for w in warns)
+        return instruments
 
-        curve = engine.build_curve(
-            name, instruments,
-            mode=spec.get("mode", "sequential"),
-            internal_day_count=spec.get("internal_day_count", "ACT/365F"),
-        )
+    for step in steps:
+        if len(step) == 1:
+            name = step[0]
+            spec = curves_cfg[name]
+            curve = engine.build_curve(
+                name, _instruments_for(name),
+                mode=spec.get("mode", "sequential"),
+                internal_day_count=spec.get("internal_day_count", "ACT/365F"),
+            )
+            built = {name: curve}
+        else:
+            group_specs = [
+                {"name": name, "instruments": _instruments_for(name),
+                 "internal_day_count": curves_cfg[name].get("internal_day_count", "ACT/365F")}
+                for name in step
+            ]
+            built = engine.build_group(group_specs)
+
         if verbose:
-            last_t = curve.times[-1]
-            print(f"  ✓ {name:<22} {len(curve.times) - 1:>2} pilares | "
-                  f"último nodo t={last_t:6.2f}y  DF={curve.df_t(last_t):.6f}")
+            for name, curve in built.items():
+                last_t = curve.times[-1]
+                print(f"  ✓ {name:<22} {len(curve.times) - 1:>2} pilares | "
+                      f"último nodo t={last_t:6.2f}y  DF={curve.df_t(last_t):.6f}")
 
     if verbose and conv_warnings:
         print(f"\n  Avisos de convención ({len(conv_warnings)}):")
