@@ -66,6 +66,10 @@
   .curve-item:hover{background:var(--panel-2)}
   .curve-item.active{border-left-color:var(--amber);background:var(--panel-2);color:var(--amber)}
   .curve-item .deps{margin-left:auto;font-size:9.5px;color:var(--muted)}
+  .curve-item .grp{font-size:8.5px;color:var(--amber);border:1px solid var(--amber);
+    border-radius:3px;padding:0 4px;margin-left:6px;letter-spacing:.03em}
+  .hint{font-size:11.5px;color:var(--amber);background:rgba(255,180,60,.08);
+    border:1px solid var(--amber);border-radius:4px;padding:6px 10px}
   .add-curve{margin:16px;width:calc(100% - 32px)}
 
   /* ---------- main editor ---------- */
@@ -937,9 +941,30 @@ async function initConfig(){
 }
 
 /* ================================================== niveles del DAG */
+/* Dos o más curvas con el mismo `group:` se construyen JUNTAS (construcción
+   simultánea, ver build_group en el motor) y por eso pueden declarar
+   depends_on CIRCULAR entre sí (p.ej. MXN_F_TIIE <-> MXN_X_SOFR). Calcular
+   el nivel ignorando esto causaría recursión infinita (levelOf(A) llama a
+   levelOf(B) que llama a levelOf(A)...). Para el nivel, las dependencias
+   INTRA-grupo no cuentan (el grupo se resuelve como una sola unidad); el
+   nivel de cada miembro se calcula a partir de las dependencias EXTERNAS
+   al grupo (unión de las de todos los miembros), y todos los miembros del
+   mismo grupo quedan en el mismo nivel. */
+function groupExternalDeps(name){
+  const group = cfg.curves[name]?.group;
+  const own = (cfg.curves[name]?.depends_on)||[];
+  if(!group) return own;
+  const members = Object.keys(cfg.curves).filter(n=>cfg.curves[n]?.group===group);
+  const ext = new Set();
+  members.forEach(m=>(cfg.curves[m]?.depends_on||[]).forEach(d=>{
+    if(!members.includes(d)) ext.add(d);
+  }));
+  return [...ext];
+}
+
 function levelOf(name, memo={}){
   if(name in memo) return memo[name];
-  const deps = (cfg.curves[name]?.depends_on)||[];
+  const deps = groupExternalDeps(name);
   memo[name] = deps.length ? 1 + Math.max(...deps.map(d=>levelOf(d,memo))) : 0;
   return memo[name];
 }
@@ -966,8 +991,9 @@ function renderRail(){
       <div class="level-head"><span class="n">N${l}</span>
         <span class="t">${names[l]||("nivel "+l)}</span></div>
       ${byLevel[l].map(n=>`
-        <button class="curve-item ${n===selected?'active':''}" data-curve="${n}">
-          ${n}<span class="deps">${(cfg.curves[n].depends_on||[]).length?'← '+(cfg.curves[n].depends_on||[]).length:''}</span>
+        <button class="curve-item ${n===selected?'active':''}" data-curve="${n}"
+          ${cfg.curves[n].group?`title="Construcción simultánea, grupo: ${cfg.curves[n].group}"`:''}>
+          ${n}${cfg.curves[n].group?'<span class="grp">⇄ grupo</span>':''}<span class="deps">${(cfg.curves[n].depends_on||[]).length?'← '+(cfg.curves[n].depends_on||[]).length:''}</span>
         </button>`).join("")}
     </div>`).join("");
   document.querySelectorAll("[data-curve]").forEach(b=>{
@@ -1002,7 +1028,14 @@ function renderEditor(){
       <div><label>Otra pata (FX fwd)</label>
         <select id="c-other"><option value="">—</option>${curveNames.map(n=>
           `<option ${n===c.other_leg?'selected':''}>${n}</option>`).join("")}</select></div>
+      <div><label>Grupo (construcción simultánea)</label>
+        <input id="c-group" value="${c.group||''}" placeholder="— (opcional)"
+          aria-label="Grupo de construcción simultánea"
+          title="Dos o más curvas con el MISMO nombre de grupo se resuelven JUNTAS en un solo solve (depends_on circular entre ellas permitido). Déjalo vacío si esta curva se construye sola."></div>
     </div>
+    ${c.group?`<p class="hint" style="margin-top:6px">⇄ Esta curva se construye <b>junto con</b> ${
+      curveNames.filter(n=>cfg.curves[n]?.group===c.group).join(', ') || '(ningún otro miembro encontrado — revisa el nombre del grupo)'
+    } en un solo solve simultáneo (grupo "${c.group}").</p>`:''}
     <div style="margin-top:14px">
       <label>Depende de</label>
       <div class="chips" id="dep-chips">
@@ -1309,6 +1342,11 @@ function bindEditor(){
   $("#c-disc").onchange = e=> c.discount=e.target.value;
   $("#c-proj").onchange = e=> c.projection=e.target.value;
   $("#c-other").onchange = e=>{ if(e.target.value) c.other_leg=e.target.value; else delete c.other_leg; };
+  $("#c-group").onchange = e=>{
+    const v = e.target.value.trim();
+    if(v) c.group=v; else delete c.group;
+    renderAll();
+  };
 
   $("#dep-add").onchange = e=>{
     if(!e.target.value) return;
