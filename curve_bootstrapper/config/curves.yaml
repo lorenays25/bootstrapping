@@ -52,7 +52,9 @@
 # qué capa salió cada campo — la vista de auditoría para reconciliación.
 # =============================================================================
 
-valuation_date: 2026-07-02
+valuation_date: 2026-08-12    # cierre de las hojas en data/quotes/*_12_08_2026.csv
+                              # DEBE coincidir con la fecha de los quotes: si no,
+                              # el motor descuenta con plazos corridos y NO avisa.
 
 market_data:
   fx_spots:
@@ -60,7 +62,7 @@ market_data:
     USDCOP: 4100.00
     USDCLP: 930.00
     USDBRL: 5.4000
-    USDMXN: 18.500
+    USDMXN: 17.14703404      # spot de cierre 12/08/2026
     USDJPY: 150.00
     USDCHF: 0.8800
     USDCAD: 1.3600
@@ -581,18 +583,28 @@ curves:
                   float_freq: Q, fx_pair: USDMXN, solve_for: quote_ccy,
                   points_factor: 10000}
     instruments:
-      - {type: fx_forward, tenor: 1M, quote: 663}
-      - {type: fx_forward, tenor: 3M, quote: 2000}
-      - {type: fx_forward, tenor: 6M, quote: 4050}
-      - {type: fx_forward, tenor: 1Y, quote: 8300}
-      # DATOS DE EJEMPLO (ficticios, ver cabecera del archivo): basis en
-      # DECIMAL (spread sobre la pata SOFR), no tasa fija. Reemplazar con
-      # quotes reales de los tickers MPBS *BGN Curncy (manual BCP, pág.
-      # 136) antes de usar esta curva para valorización real.
-      - {type: xccy_basis, tenor: 2Y,  quote: -0.0055}
-      - {type: xccy_basis, tenor: 3Y,  quote: -0.0060}
-      - {type: xccy_basis, tenor: 5Y,  quote: -0.0065}
-      - {type: xccy_basis, tenor: 10Y, quote: -0.0070}
+      # ---- Tramo corto: puntos forward USDMXN (cierre 12/08/2026) --------
+      # Cotizados en puntos; se dividen entre points_factor (10000).
+      - {type: fx_forward, tenor: 1W, quote: 96.50}
+      - {type: fx_forward, tenor: 1M, quote: 441.50}
+      - {type: fx_forward, tenor: 2M, quote: 868.00}
+      - {type: fx_forward, tenor: 3M, quote: 1347.34}
+      - {type: fx_forward, tenor: 6M, quote: 2617.945}
+      - {type: fx_forward, tenor: 9M, quote: 3844.16}
+      - {type: fx_forward, tenor: 1Y, quote: 5224.75}
+      # ---- Tramo largo: XCCY basis MXN F-TIIE 1D vs USD SOFR 1D ----------
+      # Spread sobre la pata MXN (ver XCCYBasis.model_quote). Cotizado en
+      # PUNTOS BÁSICOS en la hoja de mercado; aquí va en DECIMAL
+      # (23.0 bp -> 0.00230). Cierre 12/08/2026, mid.
+      - {type: xccy_basis, tenor: 26M,  quote: 0.00230}
+      - {type: xccy_basis, tenor: 39M,  quote: 0.00240}
+      - {type: xccy_basis, tenor: 52M,  quote: 0.00235}
+      - {type: xccy_basis, tenor: 65M,  quote: 0.00210}
+      - {type: xccy_basis, tenor: 91M,  quote: 0.00225}
+      - {type: xccy_basis, tenor: 130M, quote: 0.00255}
+      - {type: xccy_basis, tenor: 195M, quote: 0.00310}
+      - {type: xccy_basis, tenor: 260M, quote: 0.00340}
+      - {type: xccy_basis, tenor: 390M, quote: 0.00365}
 
   EUR_X_USD:
     mode: sequential

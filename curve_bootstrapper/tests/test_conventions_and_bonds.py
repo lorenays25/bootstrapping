@@ -455,6 +455,67 @@ check(intra_group_ok,
 
 
 # ---------------------------------------------------------------------------
+print("\n10) HOJA DE QUOTES — FORMATO REAL DE MERCADO (cross-currency)")
+print("   (hoja Datatec 12/08/2026: ';', coma de miles, spreads en bp,")
+print("    FX en forma par-divisas y basis que nombra las DOS divisas)")
+
+from curvelib.quotes_loader import parse_quote_name
+
+# a) un basis cross-currency NO debe confundirse con el OIS doméstico:
+#    ambos son 'Swap.26M.MXN.F-TIIE...' y solo se distinguen porque el
+#    basis nombra además la pata USD.SOFR.
+dom = parse_quote_name("Swap.26M.MXN.F-TIIE.1D/4W.BANXICO")
+crs = parse_quote_name("Swap.26M.MXN.F-TIIE.1D/USD.SOFR.1D.FRBNY")
+check(not dom["is_cross"] and crs["is_cross"],
+      "el basis XCCY se distingue del OIS doméstico con el mismo tenor/ccy/índice",
+      f"domestico is_cross={dom['is_cross']}, cross is_cross={crs['is_cross']}")
+check(crs["type"] == "xccy_basis" and dom["type"] == "ois_swap",
+      "el cross se tipifica como xccy_basis y el doméstico como ois_swap")
+
+# b) FX en forma par-divisas (FX.USD.MXN.3M) y el spot sin tenor
+fx = parse_quote_name("FX.USD.MXN.3M")
+sp = parse_quote_name("FX.USD.MXN")
+check(fx["tenor"] == "3M" and fx["ccy"] == "MXN" and fx["index"] == "USD",
+      "FX.USD.MXN.3M se lee como tenor 3M sobre el par USDMXN",
+      f"tenor={fx['tenor']}, ccy={fx['ccy']}, base={fx['index']}")
+check(sp["tenor"] is None, "FX.USD.MXN (sin tenor) se reconoce como SPOT")
+
+# c) carga completa de una hoja con los cuatro escollos a la vez
+hoja_cross = """Quote Name;Type;BID;MID;ASK
+FX.USD.MXN;Price;17.1470340400;17.1470340400;17.1470340400
+FX.USD.MXN.3M;Price;1,339.1600000000;1,347.3400000000;1,355.5200000000
+Swap.26M.MXN.F-TIIE.1D/USD.SOFR.1D.FRBNY;Spread;19.5547000000;23.0000000000;26.4453000000
+"""
+cfg_q = load_config(os.path.join(os.path.dirname(__file__), "..", "config", "curves.yaml"))
+cfg_q["market_data"]["fx_spots"]["USDMXN"] = 18.5          # spot deliberadamente viejo
+f_antes = [i["quote"] for i in cfg_q["curves"]["MXN_F_TIIE"]["instruments"]
+           if i.get("tenor") == "26M"][0]
+cfg_q, warns_q = apply_quotes_sheet(cfg_q, hoja_cross)
+
+check(any("3/3" in w for w in warns_q),
+      "los 3 quotes de la hoja cross se emparejan (spot + fwd + basis)",
+      "; ".join(warns_q))
+
+x_ins = {i["tenor"]: i["quote"] for i in cfg_q["curves"]["MXN_X_SOFR"]["instruments"]}
+check(abs(x_ins["3M"]["mid"] - 1347.34) < 1e-9,
+      "la coma de MILES no rompe el parseo ni divide el valor",
+      f"3M = {x_ins['3M']['mid']}")
+check(abs(x_ins["26M"]["mid"] - 0.0023) < 1e-12,
+      "un spread en PUNTOS BÁSICOS entra como 0.0023, no como 0.23 (factor 100)",
+      f"26M = {x_ins['26M']['mid']}")
+check(abs(cfg_q["market_data"]["fx_spots"]["USDMXN"] - 17.14703404) < 1e-9,
+      "el spot de la hoja actualiza market_data.fx_spots",
+      f"USDMXN = {cfg_q['market_data']['fx_spots']['USDMXN']}")
+
+# LA COMPROBACIÓN CRÍTICA: el basis cross NO debe pisar el swap doméstico.
+f_despues = [i["quote"] for i in cfg_q["curves"]["MXN_F_TIIE"]["instruments"]
+             if i.get("tenor") == "26M"][0]
+check(f_despues == f_antes,
+      "el basis XCCY 26M NO sobrescribe el swap F-TIIE 26M (corrupción silenciosa)",
+      f"F-TIIE 26M antes={f_antes} despues={f_despues}")
+
+
+# ---------------------------------------------------------------------------
 print("\n" + "=" * 62)
 print(f"RESULTADO: {len(OK)} pasaron, {len(FAIL)} fallaron")
 if FAIL:

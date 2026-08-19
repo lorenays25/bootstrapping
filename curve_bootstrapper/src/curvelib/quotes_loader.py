@@ -80,6 +80,18 @@ _PRICE_TYPES = {"sovereign_bond"}
 # Valores de la columna 'Type' de la hoja que indican precio.
 _PRICE_MARKERS = {"PRICE", "PRECIO", "CLEAN", "DIRTY", "PX", "CLEAN_PRICE", "DIRTY_PRICE"}
 
+# Columna 'Type' que indica que el valor viene en PUNTOS BÁSICOS (no en %).
+# Los basis cross-currency se cotizan así (23 bp), y con la escala de % se
+# habrían leído como 23% -- error de factor 100 sin ningún síntoma visible.
+_BP_MARKERS = {"SPREAD", "BASIS", "BP", "BPS", "PUNTOS BASICOS", "PUNTOS BÁSICOS"}
+
+# Códigos de divisa reconocidos dentro de un Quote Name. Se usan para
+# detectar instrumentos cross-currency (los que nombran DOS divisas).
+_KNOWN_CCY = {
+    "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "SEK", "NOK", "DKK", "AUD",
+    "NZD", "MXN", "BRL", "CLP", "COP", "PEN", "CNH", "CNY", "ARS", "UYU",
+}
+
 _ISO_DATE = _re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _US_DATE = _re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
 
@@ -103,9 +115,16 @@ def _parse_date_part(part: str):
     return None
 
 
+_TENOR_RE = _re.compile(r"^\d+[DWMY]$|^ON$|^O/N$|^TN$|^T/N$", _re.I)
+
+
+def _looks_like_tenor(s: Optional[str]) -> bool:
+    return bool(s) and bool(_TENOR_RE.match(s.strip()))
+
+
 def parse_quote_name(name: str) -> Dict[str, Optional[str]]:
     """Descompone 'Swap.5Y.USD.SOFR.1D/1Y.LIBOR01' en sus partes.
-    Devuelve {prefix, type, tenor, ccy, index, raw}."""
+    Devuelve {prefix, type, tenor, ccy, index, ccy2, is_cross, raw}."""
     parts = name.strip().split(".")
     prefix = parts[0].upper() if parts else ""
     itype = _PREFIX_TO_TYPE.get(prefix)
@@ -115,6 +134,13 @@ def parse_quote_name(name: str) -> Dict[str, Optional[str]]:
         ccy = parts[1] if len(parts) > 1 else None
         index = parts[2] if len(parts) > 2 else None
         tenor = parts[3] if len(parts) > 3 else "ON"
+    elif prefix in ("FX", "FWD") and len(parts) > 2 and not _looks_like_tenor(parts[1]):
+        # Forma par-divisas: FX.USD.MXN.3M (base.quote.tenor) y el SPOT
+        # FX.USD.MXN sin tenor. Es el formato de la hoja de Datatec; la otra
+        # forma soportada (FX.3M.MXN.SOFR) cae por la rama genérica de abajo.
+        ccy = parts[2]                      # divisa cotizada (la incógnita)
+        index = parts[1]                    # divisa base
+        tenor = parts[3] if len(parts) > 3 else None   # None => es el SPOT
     else:
         # Swap.5Y.USD.SOFR...  -> tenor=5Y, ccy=USD, index=SOFR
         tenor = parts[1] if len(parts) > 1 else None
@@ -133,8 +159,26 @@ def parse_quote_name(name: str) -> Dict[str, Optional[str]]:
     if maturity is not None and itype is None:
         itype = "sovereign_bond"
 
+    # ¿Es un instrumento CROSS-CURRENCY? Un basis swap nombra las DOS patas,
+    # p.ej. 'Swap.26M.MXN.F-TIIE.1D/USD.SOFR.1D.FRBNY' (MXN vs USD). Sin
+    # esto se parsea igual que el OIS doméstico 'Swap.26M.MXN.F-TIIE.1D/4W...'
+    # (mismo prefijo, mismo tenor, misma ccy, mismo índice) y el basis
+    # terminaba SOBRESCRIBIENDO el quote del swap doméstico -- corrupción
+    # silenciosa: un spread de 23 bp entraba como tasa de 23%.
+    tokens = _re.split(r"[.\/]", name.upper())
+    ccys = [t for t in tokens if t in _KNOWN_CCY]
+    ccy2 = None
+    for c in ccys:
+        if c != (ccy or "").upper():
+            ccy2 = c
+            break
+    is_cross = ccy2 is not None
+    if is_cross and prefix in ("SWAP", "IRS"):
+        itype = "xccy_basis"
+
     return {"prefix": prefix, "type": itype, "tenor": tenor, "maturity": maturity,
-            "ccy": ccy, "index": index, "raw": name.strip()}
+            "ccy": ccy, "index": index, "ccy2": ccy2, "is_cross": is_cross,
+            "raw": name.strip()}
 
 
 def parse_quotes_csv(text: str, rate_scale: float = 0.01) -> List[dict]:
@@ -165,7 +209,16 @@ def parse_quotes_csv(text: str, rate_scale: float = 0.01) -> List[dict]:
         is_price = (parsed.get("type") in _PRICE_TYPES) or (col_type in _PRICE_MARKERS)
         if is_price and parsed.get("type") is None:
             parsed["type"] = "sovereign_bond"
+        # Los puntos forward NO son una tasa: entran tal cual y luego se
+        # dividen entre points_factor. Escalarlos como si fueran % los
+        # dividía entre 100 en silencio (441.5 puntos -> 4.415).
+        if parsed.get("type") == "fx_forward":
+            is_price = True
         scale = 1.0 if is_price else rate_scale
+        # Un spread cotizado en PUNTOS BÁSICOS (columna Type = Spread/bp)
+        # necesita 1e-4, no 1e-2: 23 bp = 0.0023, no 0.23.
+        if not is_price and col_type in _BP_MARKERS:
+            scale = 1e-4
         parsed["is_price"] = is_price
 
         # Vencimiento explícito en columna, si la hoja lo trae
@@ -180,7 +233,15 @@ def parse_quotes_csv(text: str, rate_scale: float = 0.01) -> List[dict]:
             v = row.get(key, "")
             if v is None or str(v).strip() == "":
                 return None
-            return float(v) * _scale
+            # Las hojas con delimitador ';' suelen traer la coma como
+            # separador de MILES ("1,347.34"): float() reventaba con
+            # ValueError. Solo se quita si el archivo NO usa la coma como
+            # delimitador de campos (en ese caso nunca aparecería dentro
+            # de un valor).
+            s = str(v).strip()
+            if getattr(dialect, "delimiter", ",") != "," and "," in s:
+                s = s.replace(",", "")
+            return float(s) * _scale
 
         bid, mid, ask = num("bid"), num("mid"), num("ask")
         if mid is None:
@@ -229,13 +290,41 @@ def apply_quotes_sheet(
             if rec["ccy"] and rec["ccy"] in curve_map:
                 return curve_map[rec["ccy"]]
 
+        ccy = (rec["ccy"] or "").upper()
+        idx = (rec["index"] or "").upper()
+        has_mat = rec.get("maturity") is not None
+
+        # 1b-bis) FX forward en forma par-divisas (FX.USD.MXN.3M): la curva
+        #     destino es la que declara ese `fx_pair` en sus convenciones.
+        #     Emparejar por tokens del nombre no sirve aquí, porque el nombre
+        #     del quote trae las dos divisas y el de la curva solo una.
+        if rec.get("type") == "fx_forward" and rec.get("index") and ccy:
+            pair = f"{(rec['index'] or '').upper()}{ccy}"
+            for cname, cspec in config["curves"].items():
+                if str((cspec.get("conventions") or {}).get("fx_pair", "")).upper() == pair:
+                    return cname
+
+        # 1c) CROSS-CURRENCY: el quote nombra dos divisas (p.ej. MXN vs USD).
+        #     Su destino es la curva cross de la divisa local, NO la curva
+        #     doméstica -- que es donde caía antes por tener el mismo tenor,
+        #     ccy e índice que el OIS local, pisándole el quote en silencio.
+        #     Se identifica la curva cross porque declara `other_leg` con la
+        #     curva de la otra divisa, en vez de adivinar por el nombre.
+        if rec.get("is_cross"):
+            ccy2 = (rec.get("ccy2") or "").upper()
+            for cname, cspec in config["curves"].items():
+                t = set(cname.upper().replace("-", "_").split("_"))
+                if ccy not in t:
+                    continue
+                other = (cspec.get("other_leg") or "").upper()
+                if other and ccy2 in set(other.replace("-", "_").split("_")):
+                    return cname
+            return None   # mejor sin destino que en la curva equivocada
+
         # 2) heurística sobre el nombre de la curva.
         #    Requiere coincidencia EXACTA de ambos tokens en el nombre de la
         #    curva (p.ej. "PEN" Y "TIBO" en "PEN_OIS_TIBO"). Evita falsos
         #    positivos como que "TIBO" matchee "STIBOR".
-        ccy = (rec["ccy"] or "").upper()
-        idx = (rec["index"] or "").upper()
-        has_mat = rec.get("maturity") is not None
 
         def tokens(cname):
             # tokeniza el nombre de curva: PEN_OIS_TIBO -> {PEN, OIS, TIBO}
@@ -273,6 +362,23 @@ def apply_quotes_sheet(
 
     matched = 0
     for rec in records:
+        # El SPOT (FX.USD.MXN, sin tenor) no es un instrumento de la curva:
+        # es el spot de market_data. Sin este caso se buscaba un instrumento
+        # con tenor vacío y quedaba reportado como "sin emparejar", dejando
+        # el spot viejo del YAML en silencio -- con un spot desactualizado
+        # TODA la curva cross sale corrida.
+        if rec.get("type") == "fx_forward" and not rec.get("tenor") and rec.get("index"):
+            pair = f"{(rec['index'] or '').upper()}{(rec['ccy'] or '').upper()}"
+            spots = config.setdefault("market_data", {}).setdefault("fx_spots", {})
+            if rec["mid"] is not None:
+                anterior = spots.get(pair)
+                spots[pair] = rec["mid"]
+                matched += 1
+                if anterior is not None and abs(anterior - rec["mid"]) > 1e-12:
+                    warnings.append(
+                        f"spot {pair} actualizado: {anterior} -> {rec['mid']}")
+            continue
+
         cname = find_curve(rec)
         if not cname:
             msg = f"Sin curva destino para quote '{rec['raw']}'"
