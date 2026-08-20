@@ -455,6 +455,125 @@ check(intra_group_ok,
 
 
 # ---------------------------------------------------------------------------
+print("\n10) HOJA DE QUOTES — FORMATO REAL DE MERCADO (cross-currency)")
+print("   (hoja Datatec 12/08/2026: ';', coma de miles, spreads en bp,")
+print("    FX en forma par-divisas y basis que nombra las DOS divisas)")
+
+from curvelib.quotes_loader import parse_quote_name
+
+# a) un basis cross-currency NO debe confundirse con el OIS doméstico:
+#    ambos son 'Swap.26M.MXN.F-TIIE...' y solo se distinguen porque el
+#    basis nombra además la pata USD.SOFR.
+dom = parse_quote_name("Swap.26M.MXN.F-TIIE.1D/4W.BANXICO")
+crs = parse_quote_name("Swap.26M.MXN.F-TIIE.1D/USD.SOFR.1D.FRBNY")
+check(not dom["is_cross"] and crs["is_cross"],
+      "el basis XCCY se distingue del OIS doméstico con el mismo tenor/ccy/índice",
+      f"domestico is_cross={dom['is_cross']}, cross is_cross={crs['is_cross']}")
+check(crs["type"] == "xccy_basis" and dom["type"] == "ois_swap",
+      "el cross se tipifica como xccy_basis y el doméstico como ois_swap")
+
+# b) FX en forma par-divisas (FX.USD.MXN.3M) y el spot sin tenor
+fx = parse_quote_name("FX.USD.MXN.3M")
+sp = parse_quote_name("FX.USD.MXN")
+check(fx["tenor"] == "3M" and fx["ccy"] == "MXN" and fx["index"] == "USD",
+      "FX.USD.MXN.3M se lee como tenor 3M sobre el par USDMXN",
+      f"tenor={fx['tenor']}, ccy={fx['ccy']}, base={fx['index']}")
+check(sp["tenor"] is None, "FX.USD.MXN (sin tenor) se reconoce como SPOT")
+
+# c) carga completa de una hoja con los cuatro escollos a la vez
+hoja_cross = """Quote Name;Type;BID;MID;ASK
+FX.USD.MXN;Price;17.1470340400;17.1470340400;17.1470340400
+FX.USD.MXN.3M;Price;1,339.1600000000;1,347.3400000000;1,355.5200000000
+Swap.26M.MXN.F-TIIE.1D/USD.SOFR.1D.FRBNY;Spread;19.5547000000;23.0000000000;26.4453000000
+"""
+cfg_q = load_config(os.path.join(os.path.dirname(__file__), "..", "config", "curves.yaml"))
+cfg_q["market_data"]["fx_spots"]["USDMXN"] = 18.5          # spot deliberadamente viejo
+f_antes = [i["quote"] for i in cfg_q["curves"]["MXN_F_TIIE"]["instruments"]
+           if i.get("tenor") == "26M"][0]
+cfg_q, warns_q = apply_quotes_sheet(cfg_q, hoja_cross)
+
+check(any("3/3" in w for w in warns_q),
+      "los 3 quotes de la hoja cross se emparejan (spot + fwd + basis)",
+      "; ".join(warns_q))
+
+x_ins = {i["tenor"]: i["quote"] for i in cfg_q["curves"]["MXN_X_SOFR"]["instruments"]}
+check(abs(x_ins["3M"]["mid"] - 1347.34) < 1e-9,
+      "la coma de MILES no rompe el parseo ni divide el valor",
+      f"3M = {x_ins['3M']['mid']}")
+check(abs(x_ins["26M"]["mid"] - 0.0023) < 1e-12,
+      "un spread en PUNTOS BÁSICOS entra como 0.0023, no como 0.23 (factor 100)",
+      f"26M = {x_ins['26M']['mid']}")
+check(abs(cfg_q["market_data"]["fx_spots"]["USDMXN"] - 17.14703404) < 1e-9,
+      "el spot de la hoja actualiza market_data.fx_spots",
+      f"USDMXN = {cfg_q['market_data']['fx_spots']['USDMXN']}")
+
+# LA COMPROBACIÓN CRÍTICA: el basis cross NO debe pisar el swap doméstico.
+f_despues = [i["quote"] for i in cfg_q["curves"]["MXN_F_TIIE"]["instruments"]
+             if i.get("tenor") == "26M"][0]
+check(f_despues == f_antes,
+      "el basis XCCY 26M NO sobrescribe el swap F-TIIE 26M (corrupción silenciosa)",
+      f"F-TIIE 26M antes={f_antes} despues={f_despues}")
+
+
+# ---------------------------------------------------------------------------
+print("\n11) MXN_X_SOFR — NODO SPOT Y PARIDAD REFERIDA A SPOT")
+print("   (validado contra la salida oficial de Calypso mxn_cross.csv, cierre 12/08/2026:")
+print("    offset 2 (14/08/2026) Zero Mid=6.749140% Df Mid=0.999637220,")
+print("    offset 9 (1W) Zero Mid=6.746680%)")
+
+cfg_mxn = load_config(os.path.join(os.path.dirname(__file__), "..", "config", "curves.yaml"))
+cs_mxn = build_bid_mid_ask(select_curves(cfg_mxn, ["MXN_F_TIIE", "MXN_X_SOFR"]), verbose=False)
+rows_mxn = cs_mxn.table("MXN_X_SOFR")
+
+check(rows_mxn[0]["offset"] == 2 and rows_mxn[0]["date"] == _dt.date(2026, 8, 14),
+      "MXN_X_SOFR ahora tiene un primer pilar en la fecha spot (offset 2), antes ausente",
+      f"primer pilar: offset={rows_mxn[0]['offset']} fecha={rows_mxn[0]['date']}")
+
+z_spot = rows_mxn[0]["zero_mid"] * 100
+df_spot = rows_mxn[0]["df_mid"]
+check(abs(z_spot - 6.749140) < 0.05,
+      "tasa cero del nodo spot a <5pb del oficial de Calypso (6.749140%)",
+      f"motor={z_spot:.4f}%")
+check(abs(df_spot - 0.999637220) < 2e-6,
+      "DF del nodo spot prácticamente igual al oficial de Calypso (0.999637220)",
+      f"motor={df_spot:.9f}")
+
+z_1w = [r for r in rows_mxn if r["offset"] == 9][0]["zero_mid"] * 100
+check(abs(z_1w - 6.746680) < 0.05,
+      "1W (offset 9) a <5pb del oficial (antes +68.4pb de sesgo por descontar desde valuación)",
+      f"motor={z_1w:.4f}%  oficial=6.7467%")
+
+# spot_referred_parity es opt-in: una curva fx_forward que NO lo activa
+# (EUR_X_USD) debe seguir repreciando exactamente igual que antes del cambio.
+c_eur = build_all(select_curves(cfg_mxn, ["EUR_X_USD"]), verbose=False)["EUR_X_USD"]
+n_ins_eur = len(cfg_mxn["curves"]["EUR_X_USD"]["instruments"])
+check(len(c_eur.pillar_dates) == n_ins_eur,
+      "EUR_X_USD (spot_referred_parity no declarado) NO gana un nodo spot extra "
+      "-- un pilar por instrumento, igual que antes del cambio",
+      f"{len(c_eur.pillar_dates)} pilares == {n_ins_eur} instrumentos")
+
+# insert_spot_node: inserción es lossless (no cambia el DF interpolado en
+# ningún otro punto) y rechaza fechas fuera de orden.
+from curvelib.curve import Curve
+c_probe = Curve(name="probe", valuation_date=_dt.date(2026, 8, 12))
+idx1 = c_probe.add_node(_dt.date(2026, 8, 21), df=0.9985)   # 1W
+t_mid = c_probe.t(_dt.date(2026, 8, 17))
+df_before = c_probe.df_t(t_mid)
+c_probe.insert_spot_node(_dt.date(2026, 8, 14))
+df_after = c_probe.df_t(t_mid)
+check(abs(df_before - df_after) < 1e-14,
+      "insert_spot_node no cambia el DF interpolado en otras fechas (punto ya implícito)",
+      f"antes={df_before:.12f} despues={df_after:.12f}")
+check(c_probe.pillar_dates[0] == _dt.date(2026, 8, 14),
+      "insert_spot_node queda como PRIMER pilar de la tabla de salida")
+try:
+    c_probe.insert_spot_node(_dt.date(2026, 8, 25))  # posterior al 1W: debe rechazar
+    check(False, "insert_spot_node rechaza una fecha posterior al primer pilar real")
+except ValueError:
+    check(True, "insert_spot_node rechaza una fecha posterior al primer pilar real")
+
+
+# ---------------------------------------------------------------------------
 print("\n" + "=" * 62)
 print(f"RESULTADO: {len(OK)} pasaron, {len(FAIL)} fallaron")
 if FAIL:

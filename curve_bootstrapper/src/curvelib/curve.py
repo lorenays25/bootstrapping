@@ -63,6 +63,39 @@ class Curve:
     def set_node_log(self, idx: int, log_df: float) -> None:
         self.log_dfs[idx] = float(log_df)
 
+    def insert_spot_node(self, d: _dt.date, df: float | None = None) -> int:
+        """Inserta un nodo DERIVADO (no una incógnita del solve) justo antes
+        del primer pilar real, típicamente la fecha SPOT de una curva cross
+        que solo cotiza `fx_forward`/`xccy_basis` a partir de esa fecha.
+
+        Si `df` es None, se calcula interpolando la curva YA RESUELTA en `d`
+        (`df_t`). Como ese punto cae exactamente sobre la interpolación
+        log-lineal que ya existe entre el nodo (0, DF=1) y el primer pilar
+        real, insertarlo NO cambia el valor de la curva en ningún otro punto
+        -- es una materialización de un punto que ya estaba implícito, para
+        que aparezca como fila propia en la tabla/CSV de salida (el "primer
+        tenor" que Calypso sí muestra, ver manual "Yield Curves Generation"
+        §4.4: extrapola una tasa continua desde el primer instrumento de
+        mercado hasta la fecha spot y la deja como nodo explícito).
+
+        No usar para insertar un nodo real del solve: `add_node` es lo
+        correcto para eso (y no permite esta inserción fuera de orden a
+        propósito, para no confundir un nodo derivado con una incógnita).
+        """
+        t = self.t(d)
+        if t <= 0.0:
+            raise ValueError(f"[{self.name}] insert_spot_node: t={t:.6f} no es posterior a la valuación.")
+        if self.pillar_dates and d >= self.pillar_dates[0]:
+            raise ValueError(
+                f"[{self.name}] insert_spot_node: {d} debe ser anterior al primer "
+                f"pilar real ({self.pillar_dates[0]})."
+            )
+        value = self.df_t(t) if df is None else float(df)
+        self.times.insert(1, t)
+        self.log_dfs.insert(1, float(np.log(value)))
+        self.pillar_dates.insert(0, d)
+        return 1
+
     # ----------------------------------------------------------- evaluación
     def df_t(self, t: float) -> float:
         """DF interpolado log-linealmente; extrapola con última fwd constante."""
