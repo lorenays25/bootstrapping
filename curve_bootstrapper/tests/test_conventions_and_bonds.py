@@ -516,6 +516,64 @@ check(f_despues == f_antes,
 
 
 # ---------------------------------------------------------------------------
+print("\n11) MXN_X_SOFR — NODO SPOT Y PARIDAD REFERIDA A SPOT")
+print("   (validado contra la salida oficial de Calypso mxn_cross.csv, cierre 12/08/2026:")
+print("    offset 2 (14/08/2026) Zero Mid=6.749140% Df Mid=0.999637220,")
+print("    offset 9 (1W) Zero Mid=6.746680%)")
+
+cfg_mxn = load_config(os.path.join(os.path.dirname(__file__), "..", "config", "curves.yaml"))
+cs_mxn = build_bid_mid_ask(select_curves(cfg_mxn, ["MXN_F_TIIE", "MXN_X_SOFR"]), verbose=False)
+rows_mxn = cs_mxn.table("MXN_X_SOFR")
+
+check(rows_mxn[0]["offset"] == 2 and rows_mxn[0]["date"] == _dt.date(2026, 8, 14),
+      "MXN_X_SOFR ahora tiene un primer pilar en la fecha spot (offset 2), antes ausente",
+      f"primer pilar: offset={rows_mxn[0]['offset']} fecha={rows_mxn[0]['date']}")
+
+z_spot = rows_mxn[0]["zero_mid"] * 100
+df_spot = rows_mxn[0]["df_mid"]
+check(abs(z_spot - 6.749140) < 0.05,
+      "tasa cero del nodo spot a <5pb del oficial de Calypso (6.749140%)",
+      f"motor={z_spot:.4f}%")
+check(abs(df_spot - 0.999637220) < 2e-6,
+      "DF del nodo spot prácticamente igual al oficial de Calypso (0.999637220)",
+      f"motor={df_spot:.9f}")
+
+z_1w = [r for r in rows_mxn if r["offset"] == 9][0]["zero_mid"] * 100
+check(abs(z_1w - 6.746680) < 0.05,
+      "1W (offset 9) a <5pb del oficial (antes +68.4pb de sesgo por descontar desde valuación)",
+      f"motor={z_1w:.4f}%  oficial=6.7467%")
+
+# spot_referred_parity es opt-in: una curva fx_forward que NO lo activa
+# (EUR_X_USD) debe seguir repreciando exactamente igual que antes del cambio.
+c_eur = build_all(select_curves(cfg_mxn, ["EUR_X_USD"]), verbose=False)["EUR_X_USD"]
+n_ins_eur = len(cfg_mxn["curves"]["EUR_X_USD"]["instruments"])
+check(len(c_eur.pillar_dates) == n_ins_eur,
+      "EUR_X_USD (spot_referred_parity no declarado) NO gana un nodo spot extra "
+      "-- un pilar por instrumento, igual que antes del cambio",
+      f"{len(c_eur.pillar_dates)} pilares == {n_ins_eur} instrumentos")
+
+# insert_spot_node: inserción es lossless (no cambia el DF interpolado en
+# ningún otro punto) y rechaza fechas fuera de orden.
+from curvelib.curve import Curve
+c_probe = Curve(name="probe", valuation_date=_dt.date(2026, 8, 12))
+idx1 = c_probe.add_node(_dt.date(2026, 8, 21), df=0.9985)   # 1W
+t_mid = c_probe.t(_dt.date(2026, 8, 17))
+df_before = c_probe.df_t(t_mid)
+c_probe.insert_spot_node(_dt.date(2026, 8, 14))
+df_after = c_probe.df_t(t_mid)
+check(abs(df_before - df_after) < 1e-14,
+      "insert_spot_node no cambia el DF interpolado en otras fechas (punto ya implícito)",
+      f"antes={df_before:.12f} despues={df_after:.12f}")
+check(c_probe.pillar_dates[0] == _dt.date(2026, 8, 14),
+      "insert_spot_node queda como PRIMER pilar de la tabla de salida")
+try:
+    c_probe.insert_spot_node(_dt.date(2026, 8, 25))  # posterior al 1W: debe rechazar
+    check(False, "insert_spot_node rechaza una fecha posterior al primer pilar real")
+except ValueError:
+    check(True, "insert_spot_node rechaza una fecha posterior al primer pilar real")
+
+
+# ---------------------------------------------------------------------------
 print("\n" + "=" * 62)
 print(f"RESULTADO: {len(OK)} pasaron, {len(FAIL)} fallaron")
 if FAIL:

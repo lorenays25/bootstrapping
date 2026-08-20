@@ -29,7 +29,7 @@ from scipy.optimize import brentq, least_squares
 
 from . import dates as dt
 from .curve import Curve
-from .instruments import CurveContext, Instrument
+from .instruments import CurveContext, FXForward, Instrument
 
 
 class BootstrapError(RuntimeError):
@@ -328,6 +328,31 @@ class BootstrapEngine:
 
         for spec in specs:
             self._check(curves[spec["name"]], spec["instruments"])
+
+        # 5) Nodo spot derivado (display-only, ver Curve.insert_spot_node):
+        #    para cada curva del grupo con instrumentos fx_forward en
+        #    convención spot_referred_parity, materializa el punto en la
+        #    fecha SPOT que la paridad ya usa implícitamente por
+        #    interpolación -- es el "primer tenor" que Calypso muestra
+        #    (offset spot) y que antes no aparecía en la tabla de salida.
+        #    No es una incógnita nueva del solve: es exactamente el valor
+        #    que la curva ya resolvió, solo que ahora queda como fila propia.
+        for spec in specs:
+            curve = curves[spec["name"]]
+            spot_dates = {
+                ins.start_date for ins in spec["instruments"]
+                if isinstance(ins, FXForward) and ins.conv.get("spot_referred_parity", False)
+            }
+            if len(spot_dates) > 1:
+                raise BootstrapError(
+                    f"[{spec['name']}] instrumentos fx_forward con spot_referred_parity "
+                    f"apuntan a más de una fecha spot ({sorted(spot_dates)}) -- revisa "
+                    f"spot_lag/calendar, deben ser consistentes dentro de la misma curva."
+                )
+            if spot_dates:
+                spot_date = next(iter(spot_dates))
+                if not curve.pillar_dates or spot_date < curve.pillar_dates[0]:
+                    curve.insert_spot_node(spot_date)
 
         return curves
 

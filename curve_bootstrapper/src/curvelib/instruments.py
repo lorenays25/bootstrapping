@@ -307,10 +307,27 @@ class FXForward(Instrument):
         target = ctx.curve(self.curve_names["target"])
         other = ctx.curve(self.curve_names["other_leg"])
         d = self.pillar_date
+        if self.conv.get("spot_referred_parity", False):
+            # Paridad cubierta referida a la fecha SPOT (T+2), no a la de
+            # valuación -- la convención de mercado y la de Calypso (manual
+            # "Yield Curves Generation" §4.4/§4.6.4): el contrato forward
+            # arranca en spot, así que solo debe descontar el tramo
+            # spot->maturity, no valuación->maturity. self.start_date ya es
+            # la fecha spot (ver Instrument.build). Sin esto, el DF del
+            # tramo valuación->spot de ambas curvas se trata implícitamente
+            # como 1, lo que sesga fuertemente los tenores cortos (el tramo
+            # valuación->spot pesa proporcionalmente más cuanto más corto es
+            # el forward) y desaparece en el largo plazo.
+            t0 = self.start_date
+            other_leg_ratio = other.df(d) / other.df(t0)
+            target_ratio = target.df(d) / target.df(t0)
+        else:
+            other_leg_ratio = other.df(d)
+            target_ratio = target.df(d)
         if solve_for == "quote_ccy":     # F = S · DF_base(otra) / DF_quote(target)
-            f_model = s * other.df(d) / target.df(d)
+            f_model = s * other_leg_ratio / target_ratio
         else:                            # F = S · DF_base(target) / DF_quote(otra)
-            f_model = s * target.df(d) / other.df(d)
+            f_model = s * target_ratio / other_leg_ratio
         return f_model
 
     def residual(self, ctx: CurveContext) -> float:
@@ -858,6 +875,13 @@ CONVENTION_SCHEMA = {
         "type": "enum", "values": ["points", "outright"], "default": "points",
         "applies_to": ("fx_forward",),
         "description": "El quote FX son puntos forward o un outright. Solo fx_forward.",
+    },
+    "spot_referred_parity": {
+        "type": "bool", "default": False, "applies_to": ("fx_forward",),
+        "description": "Paridad cubierta referida a la fecha SPOT (T+2) en vez de la de "
+                       "valuación (convención de mercado y de Calypso §4.4/§4.6.4). "
+                       "Opt-in: por defecto False para no cambiar el comportamiento de "
+                       "curvas ya validadas con la convención anterior.",
     },
     "quote_convention": {
         "type": "enum", "values": ["rate", "price"], "applies_to": _FRA_LIKE,

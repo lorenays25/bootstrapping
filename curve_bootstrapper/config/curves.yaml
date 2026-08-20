@@ -581,7 +581,16 @@ curves:
     depends_on: [USD_SOFR, MXN_F_TIIE]
     conventions: {calendar: [US, MX], day_count: ACT/360, spot_lag: 2,
                   float_freq: Q, fx_pair: USDMXN, solve_for: quote_ccy,
-                  points_factor: 10000}
+                  points_factor: 10000, spot_referred_parity: true}
+    # spot_referred_parity: true -- ver hallazgo "Validación empírica contra
+    # curva oficial de Calypso" (20/08/2026, doc de proyecto
+    # curvas-mxn-metodologia.md). Sin esto, la paridad cubierta de los
+    # fx_forward (1W-1Y) descuenta desde la fecha de VALUACIÓN en vez de la
+    # fecha SPOT, sesgando el tramo corto hasta +68 pb en 1W (verificado
+    # contra la salida oficial de Calypso, mxn_cross.csv). Acotado a ESTA
+    # curva a propósito: es la única validada contra dato oficial; las
+    # otras 12 curvas del motor que también usan fx_forward mantienen el
+    # comportamiento anterior hasta que se verifiquen igual.
     instruments:
       # ---- Tramo corto: puntos forward USDMXN (cierre 12/08/2026) --------
       # Cotizados en puntos; se dividen entre points_factor (10000).
