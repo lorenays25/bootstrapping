@@ -1525,12 +1525,30 @@ const QUOTE_PREFIX_MAP = {MM:"mm",DEPO:"mm",SWAP:"ois_swap",IRS:"ois_swap",
   FRA:"fra",FUT:"future",FUTURE:"future",FX:"fx_forward",FWD:"fx_forward",
   XCCY:"xccy_basis",BASIS:"xccy_basis"};
 
+// Espejo de quotes_loader.py (backend). Ver sección 20/08/2026:
+// este parser vivía DESACOPLADO del backend y no tenía los 4 fixes de
+// datos reales (corrupción cross-currency, forma par-divisas FX, fila
+// SPOT, escala en puntos básicos) -- se portan aquí para que "Cargar
+// quotes (CSV)" en el navegador haga exactamente lo mismo que el script
+// de Python.
+const _BP_MARKERS = new Set(["SPREAD","BASIS","BP","BPS","PUNTOS BASICOS","PUNTOS BÁSICOS"]);
+const _KNOWN_CCY = new Set(["USD","EUR","GBP","JPY","CHF","CAD","SEK","NOK","DKK","AUD",
+  "NZD","MXN","BRL","CLP","COP","PEN","CNH","CNY","ARS","UYU"]);
+const _TENOR_RE = /^\d+[DWMY]$|^ON$|^O\/N$|^TN$|^T\/N$/i;
+function looksLikeTenor(s){ return !!s && _TENOR_RE.test(s.trim()); }
+
 function parseQuoteName(name){
   const parts = name.trim().split(".");
   const prefix = (parts[0]||"").toUpperCase();
   let tenor=null, ccy=null, index=null, maturity=null;
   if(prefix==="MM"||prefix==="DEPO"){
     ccy=parts[1]; index=parts[2]; tenor=parts[3]||"ON";
+  } else if((prefix==="FX"||prefix==="FWD") && parts.length>2 && !looksLikeTenor(parts[1])){
+    // Forma par-divisas: FX.USD.MXN.3M (base.quote.tenor) y el SPOT
+    // FX.USD.MXN sin tenor -- formato de la hoja Datatec.
+    ccy = parts[2];                       // divisa cotizada (la incógnita)
+    index = parts[1];                     // divisa base
+    tenor = parts.length>3 ? parts[3] : null;   // null => es el SPOT
   } else { tenor=parts[1]; ccy=parts[2]; index=parts[3]; }
 
   /* Un bono no se identifica por tenor sino por VENCIMIENTO. Busca una fecha
@@ -1542,8 +1560,21 @@ function parseQuoteName(name){
     if(d){ maturity=d; break; }
   }
 
-  return {prefix, type:QUOTE_PREFIX_MAP[prefix], tenor: maturity?null:tenor,
-          ccy, index, maturity, raw:name.trim()};
+  // ¿Es un instrumento CROSS-CURRENCY? Nombra DOS divisas, p.ej.
+  // 'Swap.26M.MXN.F-TIIE.1D/USD.SOFR.1D.FRBNY' (MXN vs USD). Sin esto se
+  // parsea igual que el OIS doméstico 'Swap.26M.MXN.F-TIIE.1D/4W...'
+  // (mismo prefijo/tenor/ccy/índice) y el basis SOBRESCRIBE el quote
+  // doméstico en silencio -- la misma corrupción que se corrigió en Python.
+  const tokens = name.toUpperCase().split(/[.\/]/);
+  const ccys = tokens.filter(t=>_KNOWN_CCY.has(t));
+  let ccy2 = null;
+  for(const c of ccys){ if(c !== (ccy||"").toUpperCase()){ ccy2=c; break; } }
+  const isCross = ccy2 !== null;
+  let type = QUOTE_PREFIX_MAP[prefix];
+  if(isCross && (prefix==="SWAP"||prefix==="IRS")) type = "xccy_basis";
+
+  return {prefix, type, tenor: maturity?null:tenor,
+          ccy, index, ccy2, isCross, maturity, raw:name.trim()};
 }
 
 function normTenor(v){ if(v===true)return"ON"; if(v===false)return"OFF"; return String(v).toUpperCase().trim(); }
@@ -1589,9 +1620,16 @@ function parseQuotesCSV(text, rateScale=0.01){
 
     // detectar si es precio
     const colType = iType>=0 ? (cells[iType]||"").trim().toUpperCase() : "";
-    const isPrice = _PRICE_PREFIXES.has(p.prefix||"") || _PRICE_TYPES_COL.has(colType);
+    let isPrice = _PRICE_PREFIXES.has(p.prefix||"") || _PRICE_TYPES_COL.has(colType);
+    // Los puntos forward NO son una tasa: entran tal cual (luego se dividen
+    // entre points_factor). Escalarlos como % los dividía entre 100 en
+    // silencio (441.5 puntos -> 4.415, sin ningún error visible).
+    if(p.type === "fx_forward") isPrice = true;
     p.isPrice = isPrice;
-    const scale = isPrice ? 1.0 : rateScale;
+    let scale = isPrice ? 1.0 : rateScale;
+    // Un spread en PUNTOS BÁSICOS (columna Type = Spread/bp) necesita 1e-4,
+    // no 1e-2: 23 bp = 0.0023, no 0.23 (factor 100 de más).
+    if(!isPrice && _BP_MARKERS.has(colType)) scale = 1e-4;
 
     // vencimiento explícito en columna
     if(!p.maturity && iMat>=0){
@@ -1599,7 +1637,15 @@ function parseQuotesCSV(text, rateScale=0.01){
       if(raw) p.maturity = parseDatePart(raw);
     }
 
-    const num = i => { const v=(cells[i]||"").trim(); return v===""?null:parseFloat(v)*scale; };
+    const num = i => {
+      let v=(cells[i]||"").trim(); if(v==="") return null;
+      // Hojas con delimitador ';' suelen traer la coma como separador de
+      // MILES ("1,347.34"): parseFloat la corta en el primer caracter
+      // inválido y daría 1 en vez de 1347.34. Solo se quita si el archivo
+      // NO usa la coma como delimitador de campos.
+      if(delim !== "," && v.includes(",")) v = v.replace(/,/g,"");
+      return parseFloat(v)*scale;
+    };
     let bid=num(iBid), mid=num(iMid), ask=num(iAsk);
     if(mid==null) mid = bid!=null?bid:ask;
     p.bid=bid; p.mid=mid; p.ask=ask;
@@ -1614,13 +1660,40 @@ function findCurveFor(rec){
      no debe matchear "STIBOR". El índice del quote se compara como
      SUBCONJUNTO de tokens (no igualdad exacta): "F-TIIE" tokeniza a
      {F, TIIE} y debe matchear MXN_F_TIIE, cuyos tokens son {MXN, F, TIIE}. */
-  function tokens(name){ return new Set(name.toUpperCase().split(/[_\-]/)); }
+  function tokens(name){ return new Set(name.toUpperCase().replace(/-/g,"_").split("_")); }
   function isSubset(sub, set){ for(const x of sub){ if(!set.has(x)) return false; } return true; }
   const names = Object.keys(cfg.curves);
   const ccy = (rec.ccy||"").toUpperCase();
   const idx = (rec.index||"").toUpperCase();
   const idxTokens = tokens(idx);
   const hasMat = !!rec.maturity;
+
+  // FX forward en forma par-divisas (FX.USD.MXN.3M): la curva destino es
+  // la que declara ese fx_pair en sus convenciones -- emparejar por tokens
+  // no sirve aquí porque el nombre del quote trae las DOS divisas.
+  if(rec.type === "fx_forward" && rec.index && ccy){
+    const pair = `${(rec.index||"").toUpperCase()}${ccy}`;
+    for(const n of names){
+      const fxp = String((cfg.curves[n].conventions||{}).fx_pair||"").toUpperCase();
+      if(fxp === pair) return n;
+    }
+  }
+
+  // CROSS-CURRENCY: el quote nombra dos divisas (p.ej. MXN vs USD). Su
+  // destino es la curva CROSS de la divisa local, NO la doméstica -- que
+  // es donde caía antes por compartir tenor/ccy/índice, pisándole el quote
+  // en silencio. Se identifica la curva cross porque declara `other_leg`
+  // con la curva de la otra divisa, en vez de adivinar por el nombre.
+  if(rec.isCross){
+    const ccy2 = (rec.ccy2||"").toUpperCase();
+    for(const n of names){
+      const t = tokens(n);
+      if(!t.has(ccy)) continue;
+      const other = String(cfg.curves[n].other_leg||"").toUpperCase();
+      if(other && tokens(other).has(ccy2)) return n;
+    }
+    return null;   // mejor sin destino que en la curva equivocada
+  }
 
   // ccy exacto + index como subconjunto de tokens (swaps/MM)
   if(ccy && idx && !hasMat){
@@ -1641,6 +1714,25 @@ function applyQuotes(text){
   const recs = parseQuotesCSV(text);
   let matched=0; const notes=[];
   for(const rec of recs){
+    // El SPOT (FX.USD.MXN, sin tenor) no es un instrumento de la curva: es
+    // el spot de market_data. Sin este caso quedaba "sin emparejar" y el
+    // spot viejo del YAML se quedaba tal cual, sin avisar -- con un spot
+    // desactualizado TODA la curva cross sale corrida.
+    if(rec.type === "fx_forward" && !rec.tenor && rec.index){
+      const pair = `${(rec.index||"").toUpperCase()}${(rec.ccy||"").toUpperCase()}`;
+      cfg.market_data = cfg.market_data || {};
+      cfg.market_data.fx_spots = cfg.market_data.fx_spots || {};
+      if(rec.mid != null){
+        const anterior = cfg.market_data.fx_spots[pair];
+        cfg.market_data.fx_spots[pair] = rec.mid;
+        matched++;
+        if(anterior != null && Math.abs(anterior-rec.mid) > 1e-12){
+          notes.push(`· spot ${pair} actualizado: ${anterior} -> ${rec.mid}`);
+        }
+      }
+      continue;
+    }
+
     const cname = findCurveFor(rec);
     if(!cname){ notes.push("· sin curva destino: "+rec.raw); continue; }
     const insts = cfg.curves[cname].instruments||[];
