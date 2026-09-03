@@ -1,0 +1,100 @@
+# Superficies de volatilidad FX — Módulo 2
+#
+# Las CONVENCIONES no se escriben aquí: se leen del panel de parámetros exportado
+# de Calypso (`parameters:`), que es la fuente de verdad. Este YAML solo declara
+# qué archivos alimentan cada superficie y los datos que no están en ese panel
+# (divisas del par, delivery lag).
+#
+# `overrides:` permite forzar un parámetro para análisis de sensibilidad, p.ej.
+# construir USD/MXN con la convención de mercado emergente y medir el impacto:
+#     overrides: {Spot Delta Last Tenor: 0D, ATM Zero Straddle Last Tenor: 0D}
+#
+# `holidays:` son las plazas del campo `Holidays` del panel de Calypso. Validadas
+# contra la grilla DAILY: NYC,MEX y NYC,BRA reproducen exactamente los días
+# hábiles excluidos (36 y 38 en dos años). Ver docs/VALIDACION.md.
+#
+# `wing_slope_factor:` (opcional, global o por par) escala la pendiente de la
+# extensión lineal del ala más allá de los nodos de 10 delta. 1.0 = tangente pura,
+# que es el valor validado.
+
+valuation_date: 2026-09-01
+
+market_data:
+  # OJO: este export trae los spots redondeados a 2 decimales. El spot multiplica
+  # al forward y por tanto fija todos los strikes -- ver aviso al construir.
+  fx_spots_file: ../data/curves/tc_calypso_01_09_2026.csv
+  curves:
+    USD: ../data/curves/usd_sofr_calypso_01_09_2026.csv
+    MXN: ../data/curves/mxn_coll_usd_sofr_calypso_01_09_2026.csv
+    PEN: ../data/curves/pen_coll_usd_sofr_calypso_01_09_2026.csv
+    BRL: ../data/curves/brl_coll_usd_sofr_calypso_01_09_2026.csv
+    CLP: ../data/curves/clp_coll_usd_sofr_calypso_01_09_2026.csv
+    COP: ../data/curves/cop_coll_usd_sofr_calypso_01_09_2026.csv
+    EUR: ../data/curves/eur_coll_usd_sofr_calypso_01_09_2026.csv
+
+surfaces:
+  USDMXN:
+    holidays: NYC,MEX          # campo `Holidays` del panel de Calypso
+    base_ccy: USD
+    quote_ccy: MXN
+    delivery_lag: 2
+    parameters:  ../data/vol_quotes/usdmxn_vol_parameters_01_09_2026.csv
+    underlyings: ../data/vol_quotes/usdmxn_vol_underlyings_01_09_2026.csv
+    # El panel de parametros redondea a 3 decimales; el export Surface RR/BF
+    # trae 7. Los lados bid/ask salen de los exports Points BID/ASK.
+    quotes:
+      bid: ../data/vol_quotes/usdmxn_vol_quotes_bid_01_09_2026.csv
+      mid: ../data/vol_quotes/usdmxn_vol_quotes_mid_01_09_2026.csv
+      ask: ../data/vol_quotes/usdmxn_vol_quotes_ask_01_09_2026.csv
+
+  USDPEN:
+    holidays: NYC,LIM          # campo `Holidays` del panel de Calypso
+    base_ccy: USD
+    quote_ccy: PEN
+    delivery_lag: 2
+    parameters:  ../data/vol_quotes/usdpen_vol_parameters_01_09_2026.csv
+    underlyings: ../data/vol_quotes/usdpen_vol_underlyings_01_09_2026.csv
+    quotes: {mid: ../data/vol_quotes/usdpen_vol_quotes_01_09_2026.csv}
+
+  USDBRL:
+    holidays: NYC,BRA          # campo `Holidays` del panel de Calypso
+    base_ccy: USD
+    quote_ccy: BRL
+    delivery_lag: 2
+    parameters:  ../data/vol_quotes/usdbrl_vol_parameters_01_09_2026.csv
+    underlyings: ../data/vol_quotes/usdbrl_vol_underlyings_01_09_2026.csv
+    # El panel de parametros redondea a 3 decimales; el export Surface RR/BF
+    # trae 7. Los lados bid/ask salen de los exports Points BID/ASK.
+    quotes:
+      bid: ../data/vol_quotes/usdbrl_vol_quotes_bid_01_09_2026.csv
+      mid: ../data/vol_quotes/usdbrl_vol_quotes_mid_01_09_2026.csv
+      ask: ../data/vol_quotes/usdbrl_vol_quotes_ask_01_09_2026.csv
+
+  USDCLP:
+    holidays: NYC,SCL          # campo `Holidays` del panel de Calypso
+    base_ccy: USD
+    quote_ccy: CLP
+    delivery_lag: 2
+    parameters:  ../data/vol_quotes/usdclp_vol_parameters_01_09_2026.csv
+    underlyings: ../data/vol_quotes/usdclp_vol_underlyings_01_09_2026.csv
+    quotes: {mid: ../data/vol_quotes/usdclp_vol_quotes_01_09_2026.csv}
+
+  USDCOP:
+    holidays: NYC,BOG          # campo `Holidays` del panel de Calypso
+    base_ccy: USD
+    quote_ccy: COP
+    delivery_lag: 2
+    parameters:  ../data/vol_quotes/usdcop_vol_parameters_01_09_2026.csv
+    underlyings: ../data/vol_quotes/usdcop_vol_underlyings_01_09_2026.csv
+    quotes: {mid: ../data/vol_quotes/usdcop_vol_quotes_01_09_2026.csv}
+
+  EURUSD:
+    holidays: NYC,TGT          # campo `Holidays` del panel de Calypso
+    base_ccy: EUR
+    quote_ccy: USD
+    delivery_lag: 2
+    # el panel de EUR/USD trae 'Volatility Day Count' vacío; se avisa y se asume:
+    vol_day_count_fallback: ACT/365
+    parameters:  ../data/vol_quotes/eurusd_vol_parameters_01_09_2026.csv
+    underlyings: ../data/vol_quotes/eurusd_vol_underlyings_01_09_2026.csv
+    quotes: {mid: ../data/vol_quotes/eurusd_vol_quotes_01_09_2026.csv}

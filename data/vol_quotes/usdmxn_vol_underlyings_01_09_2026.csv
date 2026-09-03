@@ -1,0 +1,61 @@
+Id;Type;Description
+27995;FXOpt;USD/MXN 1W ATM
+27983;FXOpt;USD/MXN 1W Butterfly 25-delta
+27959;FXOpt;USD/MXN 1W Risk Reversal 25-delta
+27971;FXOpt;USD/MXN 1W Butterfly 10-delta
+27947;FXOpt;USD/MXN 1W Risk Reversal 10-delta
+35455;FXOpt;USD/MXN 2W ATM
+35459;FXOpt;USD/MXN 2W Butterfly 25-delta
+35457;FXOpt;USD/MXN 2W Risk Reversal 25-delta
+35458;FXOpt;USD/MXN 2W Butterfly 10-delta
+35456;FXOpt;USD/MXN 2W Risk Reversal 10-delta
+35460;FXOpt;USD/MXN 3W ATM
+35464;FXOpt;USD/MXN 3W Butterfly 25-delta
+35462;FXOpt;USD/MXN 3W Risk Reversal 25-delta
+35463;FXOpt;USD/MXN 3W Butterfly 10-delta
+35461;FXOpt;USD/MXN 3W Risk Reversal 10-delta
+27996;FXOpt;USD/MXN 1M ATM
+27984;FXOpt;USD/MXN 1M Butterfly 25-delta
+27960;FXOpt;USD/MXN 1M Risk Reversal 25-delta
+27972;FXOpt;USD/MXN 1M Butterfly 10-delta
+27948;FXOpt;USD/MXN 1M Risk Reversal 10-delta
+27997;FXOpt;USD/MXN 2M ATM
+27985;FXOpt;USD/MXN 2M Butterfly 25-delta
+27961;FXOpt;USD/MXN 2M Risk Reversal 25-delta
+27973;FXOpt;USD/MXN 2M Butterfly 10-delta
+27949;FXOpt;USD/MXN 2M Risk Reversal 10-delta
+27998;FXOpt;USD/MXN 3M ATM
+27986;FXOpt;USD/MXN 3M Butterfly 25-delta
+27962;FXOpt;USD/MXN 3M Risk Reversal 25-delta
+27974;FXOpt;USD/MXN 3M Butterfly 10-delta
+27950;FXOpt;USD/MXN 3M Risk Reversal 10-delta
+3051741;FXOpt;USD/MXN 4M ATM
+3051744;FXOpt;USD/MXN 4M Butterfly 25-delta
+3051742;FXOpt;USD/MXN 4M Risk Reversal 25-delta
+3051745;FXOpt;USD/MXN 4M Butterfly 10-delta
+3051743;FXOpt;USD/MXN 4M Risk Reversal 10-delta
+27999;FXOpt;USD/MXN 6M ATM
+27987;FXOpt;USD/MXN 6M Butterfly 25-delta
+27963;FXOpt;USD/MXN 6M Risk Reversal 25-delta
+27975;FXOpt;USD/MXN 6M Butterfly 10-delta
+27951;FXOpt;USD/MXN 6M Risk Reversal 10-delta
+28000;FXOpt;USD/MXN 9M ATM
+27988;FXOpt;USD/MXN 9M Butterfly 25-delta
+27964;FXOpt;USD/MXN 9M Risk Reversal 25-delta
+27976;FXOpt;USD/MXN 9M Butterfly 10-delta
+27952;FXOpt;USD/MXN 9M Risk Reversal 10-delta
+28001;FXOpt;USD/MXN 1Y ATM
+27989;FXOpt;USD/MXN 1Y Butterfly 25-delta
+27965;FXOpt;USD/MXN 1Y Risk Reversal 25-delta
+27977;FXOpt;USD/MXN 1Y Butterfly 10-delta
+27953;FXOpt;USD/MXN 1Y Risk Reversal 10-delta
+28002;FXOpt;USD/MXN 18M ATM
+27990;FXOpt;USD/MXN 18M Butterfly 25-delta
+27966;FXOpt;USD/MXN 18M Risk Reversal 25-delta
+27978;FXOpt;USD/MXN 18M Butterfly 10-delta
+27954;FXOpt;USD/MXN 18M Risk Reversal 10-delta
+28003;FXOpt;USD/MXN 2Y ATM
+27991;FXOpt;USD/MXN 2Y Butterfly 25-delta
+27967;FXOpt;USD/MXN 2Y Risk Reversal 25-delta
+27979;FXOpt;USD/MXN 2Y Butterfly 10-delta
+27955;FXOpt;USD/MXN 2Y Risk Reversal 10-delta

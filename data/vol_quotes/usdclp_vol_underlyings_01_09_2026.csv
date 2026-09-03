@@ -1,0 +1,66 @@
+Id;Type;Description
+4474338;FXOpt;USD/CLP 1D ATM
+4474336;FXOpt;USD/CLP 1D Butterfly 25-delta
+4474334;FXOpt;USD/CLP 1D Risk Reversal 25-delta
+4474337;FXOpt;USD/CLP 1D Butterfly 10-delta
+4474335;FXOpt;USD/CLP 1D Risk Reversal 10-delta
+4474328;FXOpt;USD/CLP 1W ATM
+4474326;FXOpt;USD/CLP 1W Butterfly 25-delta
+4474324;FXOpt;USD/CLP 1W Risk Reversal 25-delta
+4474327;FXOpt;USD/CLP 1W Butterfly 10-delta
+4474325;FXOpt;USD/CLP 1W Risk Reversal 10-delta
+4474313;FXOpt;USD/CLP 2W ATM
+4474311;FXOpt;USD/CLP 2W Butterfly 25-delta
+4474309;FXOpt;USD/CLP 2W Risk Reversal 25-delta
+4474312;FXOpt;USD/CLP 2W Butterfly 10-delta
+4474310;FXOpt;USD/CLP 2W Risk Reversal 10-delta
+4474298;FXOpt;USD/CLP 3W ATM
+4474296;FXOpt;USD/CLP 3W Butterfly 25-delta
+4474294;FXOpt;USD/CLP 3W Risk Reversal 25-delta
+4474297;FXOpt;USD/CLP 3W Butterfly 10-delta
+4474295;FXOpt;USD/CLP 3W Risk Reversal 10-delta
+4474333;FXOpt;USD/CLP 1M ATM
+4474331;FXOpt;USD/CLP 1M Butterfly 25-delta
+4474329;FXOpt;USD/CLP 1M Risk Reversal 25-delta
+4474332;FXOpt;USD/CLP 1M Butterfly 10-delta
+4474330;FXOpt;USD/CLP 1M Risk Reversal 10-delta
+4474318;FXOpt;USD/CLP 2M ATM
+4474316;FXOpt;USD/CLP 2M Butterfly 25-delta
+4474314;FXOpt;USD/CLP 2M Risk Reversal 25-delta
+4474317;FXOpt;USD/CLP 2M Butterfly 10-delta
+4474315;FXOpt;USD/CLP 2M Risk Reversal 10-delta
+4474303;FXOpt;USD/CLP 3M ATM
+4474301;FXOpt;USD/CLP 3M Butterfly 25-delta
+4474299;FXOpt;USD/CLP 3M Risk Reversal 25-delta
+4474302;FXOpt;USD/CLP 3M Butterfly 10-delta
+4474300;FXOpt;USD/CLP 3M Risk Reversal 10-delta
+4474293;FXOpt;USD/CLP 4M ATM
+4474291;FXOpt;USD/CLP 4M Butterfly 25-delta
+4474289;FXOpt;USD/CLP 4M Risk Reversal 25-delta
+4474292;FXOpt;USD/CLP 4M Butterfly 10-delta
+4474290;FXOpt;USD/CLP 4M Risk Reversal 10-delta
+4474288;FXOpt;USD/CLP 6M ATM
+4474286;FXOpt;USD/CLP 6M Butterfly 25-delta
+4474284;FXOpt;USD/CLP 6M Risk Reversal 25-delta
+4474287;FXOpt;USD/CLP 6M Butterfly 10-delta
+4474285;FXOpt;USD/CLP 6M Risk Reversal 10-delta
+4474283;FXOpt;USD/CLP 9M ATM
+4474281;FXOpt;USD/CLP 9M Butterfly 25-delta
+4474279;FXOpt;USD/CLP 9M Risk Reversal 25-delta
+4474282;FXOpt;USD/CLP 9M Butterfly 10-delta
+4474280;FXOpt;USD/CLP 9M Risk Reversal 10-delta
+4474323;FXOpt;USD/CLP 1Y ATM
+4474321;FXOpt;USD/CLP 1Y Butterfly 25-delta
+4474319;FXOpt;USD/CLP 1Y Risk Reversal 25-delta
+4474322;FXOpt;USD/CLP 1Y Butterfly 10-delta
+4474320;FXOpt;USD/CLP 1Y Risk Reversal 10-delta
+4474343;FXOpt;USD/CLP 18M ATM
+4474341;FXOpt;USD/CLP 18M Butterfly 25-delta
+4474339;FXOpt;USD/CLP 18M Risk Reversal 25-delta
+4474342;FXOpt;USD/CLP 18M Butterfly 10-delta
+4474340;FXOpt;USD/CLP 18M Risk Reversal 10-delta
+4474308;FXOpt;USD/CLP 2Y ATM
+4474306;FXOpt;USD/CLP 2Y Butterfly 25-delta
+4474304;FXOpt;USD/CLP 2Y Risk Reversal 25-delta
+4474307;FXOpt;USD/CLP 2Y Butterfly 10-delta
+4474305;FXOpt;USD/CLP 2Y Risk Reversal 10-delta

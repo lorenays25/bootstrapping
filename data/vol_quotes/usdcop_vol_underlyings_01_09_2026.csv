@@ -1,0 +1,66 @@
+Id;Type;Description
+4474349;FXOpt;USD/COP 1D ATM
+4474351;FXOpt;USD/COP 1D Butterfly 25-delta
+4474353;FXOpt;USD/COP 1D Risk Reversal 25-delta
+4474350;FXOpt;USD/COP 1D Butterfly 10-delta
+4474352;FXOpt;USD/COP 1D Risk Reversal 10-delta
+4474359;FXOpt;USD/COP 1W ATM
+4474361;FXOpt;USD/COP 1W Butterfly 25-delta
+4474363;FXOpt;USD/COP 1W Risk Reversal 25-delta
+4474360;FXOpt;USD/COP 1W Butterfly 10-delta
+4474362;FXOpt;USD/COP 1W Risk Reversal 10-delta
+4474374;FXOpt;USD/COP 2W ATM
+4474376;FXOpt;USD/COP 2W Butterfly 25-delta
+4474378;FXOpt;USD/COP 2W Risk Reversal 25-delta
+4474375;FXOpt;USD/COP 2W Butterfly 10-delta
+4474377;FXOpt;USD/COP 2W Risk Reversal 10-delta
+4474389;FXOpt;USD/COP 3W ATM
+4474391;FXOpt;USD/COP 3W Butterfly 25-delta
+4474393;FXOpt;USD/COP 3W Risk Reversal 25-delta
+4474390;FXOpt;USD/COP 3W Butterfly 10-delta
+4474392;FXOpt;USD/COP 3W Risk Reversal 10-delta
+4474354;FXOpt;USD/COP 1M ATM
+4474356;FXOpt;USD/COP 1M Butterfly 25-delta
+4474358;FXOpt;USD/COP 1M Risk Reversal 25-delta
+4474355;FXOpt;USD/COP 1M Butterfly 10-delta
+4474357;FXOpt;USD/COP 1M Risk Reversal 10-delta
+4474369;FXOpt;USD/COP 2M ATM
+4474371;FXOpt;USD/COP 2M Butterfly 25-delta
+4474373;FXOpt;USD/COP 2M Risk Reversal 25-delta
+4474370;FXOpt;USD/COP 2M Butterfly 10-delta
+4474372;FXOpt;USD/COP 2M Risk Reversal 10-delta
+4474384;FXOpt;USD/COP 3M ATM
+4474386;FXOpt;USD/COP 3M Butterfly 25-delta
+4474388;FXOpt;USD/COP 3M Risk Reversal 25-delta
+4474385;FXOpt;USD/COP 3M Butterfly 10-delta
+4474387;FXOpt;USD/COP 3M Risk Reversal 10-delta
+4474394;FXOpt;USD/COP 4M ATM
+4474396;FXOpt;USD/COP 4M Butterfly 25-delta
+4474398;FXOpt;USD/COP 4M Risk Reversal 25-delta
+4474395;FXOpt;USD/COP 4M Butterfly 10-delta
+4474397;FXOpt;USD/COP 4M Risk Reversal 10-delta
+4474399;FXOpt;USD/COP 6M ATM
+4474401;FXOpt;USD/COP 6M Butterfly 25-delta
+4474403;FXOpt;USD/COP 6M Risk Reversal 25-delta
+4474400;FXOpt;USD/COP 6M Butterfly 10-delta
+4474402;FXOpt;USD/COP 6M Risk Reversal 10-delta
+4474404;FXOpt;USD/COP 9M ATM
+4474406;FXOpt;USD/COP 9M Butterfly 25-delta
+4474408;FXOpt;USD/COP 9M Risk Reversal 25-delta
+4474405;FXOpt;USD/COP 9M Butterfly 10-delta
+4474407;FXOpt;USD/COP 9M Risk Reversal 10-delta
+4474364;FXOpt;USD/COP 1Y ATM
+4474366;FXOpt;USD/COP 1Y Butterfly 25-delta
+4474368;FXOpt;USD/COP 1Y Risk Reversal 25-delta
+4474365;FXOpt;USD/COP 1Y Butterfly 10-delta
+4474367;FXOpt;USD/COP 1Y Risk Reversal 10-delta
+4474344;FXOpt;USD/COP 18M ATM
+4474346;FXOpt;USD/COP 18M Butterfly 25-delta
+4474348;FXOpt;USD/COP 18M Risk Reversal 25-delta
+4474345;FXOpt;USD/COP 18M Butterfly 10-delta
+4474347;FXOpt;USD/COP 18M Risk Reversal 10-delta
+4474379;FXOpt;USD/COP 2Y ATM
+4474381;FXOpt;USD/COP 2Y Butterfly 25-delta
+4474383;FXOpt;USD/COP 2Y Risk Reversal 25-delta
+4474380;FXOpt;USD/COP 2Y Butterfly 10-delta
+4474382;FXOpt;USD/COP 2Y Risk Reversal 10-delta

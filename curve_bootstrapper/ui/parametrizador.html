@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Parametrizador de Curvas — curvelib</title>
+<title>Parametrizador — curvelib + vollib</title>
 <!--SERVER_MODE-->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -156,28 +156,80 @@
   dialog pre{margin:0;padding:16px 18px;overflow:auto;max-height:58vh;
     font-family:var(--mono);font-size:11.5px;line-height:1.55;color:#B9C6D8}
   @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+  /* El atributo `hidden` NO alcanza para ocultar las vistas: ambas llevan la
+     clase .wrap, cuyo `display:grid` (regla de autor) le gana al `display:none`
+     del user-agent para [hidden]. Sin esta regla las dos vistas quedan apiladas
+     y la de superficies aparece debajo del fold — parece que la pestaña no hace
+     nada. */
+  [hidden]{display:none!important}
+
+  /* ---------- pestañas (Módulo 1 / Módulo 2) ---------- */
+  .tabs{display:flex;gap:4px;margin-left:18px}
+  .tab{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    padding:6px 13px;border:1px solid var(--line);background:transparent;color:var(--muted)}
+  .tab:hover{color:var(--text);border-color:var(--line)}
+  .tab.active{background:var(--panel-2);border-color:var(--amber);color:var(--amber)}
+
+  /* ---------- vista de superficies de volatilidad ---------- */
+  .pair-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    background:transparent;border:none;border-left:2px solid transparent;
+    padding:8px 16px;font-family:var(--mono);font-size:12.5px;color:var(--text);border-radius:0}
+  .pair-item:hover{background:var(--panel-2)}
+  .pair-item.active{border-left-color:var(--amber);background:var(--panel-2);color:var(--amber)}
+  .pair-item .n{margin-left:auto;font-size:9.5px;color:var(--muted)}
+  .pill{font-family:var(--mono);font-size:9px;border:1px solid var(--line);border-radius:3px;
+    padding:1px 5px;color:var(--cyan);letter-spacing:.02em}
+  .pill.warn{color:var(--amber);border-color:var(--amber-dim)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;
+    font-family:var(--mono);font-size:11.5px;align-items:baseline}
+  .kv b{color:var(--muted);font-weight:500;white-space:nowrap}
+  .kv span.v{color:var(--text)}
+  .kv span.v.dev{color:var(--amber)}
+  .flag{border-left:2px solid var(--amber);background:rgba(245,166,35,.07);
+    padding:8px 11px;margin-bottom:7px;font-size:11.5px;line-height:1.55;border-radius:0 4px 4px 0}
+  .flag code{font-family:var(--mono);color:var(--amber)}
+  .flag .why{color:var(--muted);display:block;margin-top:3px;font-size:11px}
+  .stick th{position:sticky;top:0;background:var(--panel-2);z-index:1}
+  .num{text-align:right;font-family:var(--mono)}
+  .vq-ta{width:100%;height:120px;background:var(--ink);border:1px solid var(--line);
+    color:var(--text);border-radius:4px;padding:8px;font-family:var(--mono);
+    font-size:10.5px;resize:vertical}
+  .vq-ta:focus{outline:2px solid var(--amber);outline-offset:1px}
+  dialog#dlg-vol-quotes{width:min(1100px,96vw)}
+  dialog#dlg-vol-results,dialog#dlg-vol-sens{width:min(1150px,96vw)}
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Parametrizador <span>·</span> Curvas de Descuento</h1>
+  <h1>Parametrizador <span>·</span> Factores de Riesgo</h1>
+  <div class="tabs">
+    <button class="tab active" id="tab-curves" data-view="curves">Curvas</button>
+    <button class="tab" id="tab-vol" data-view="vol">Superficies de Vol</button>
+  </div>
   <div class="valdate">
     <label for="valdate">Fecha valuación</label>
     <input type="date" id="valdate">
   </div>
+  <div class="valdate" id="vol-valdate-wrap" style="display:none">
+    <label for="vol-valdate">Fecha cálculo</label>
+    <input type="date" id="vol-valdate">
+  </div>
   <div class="spacer"></div>
   <span class="status" id="status">Cargando…</span>
-  <button class="ghost" id="btn-quotes">Cargar quotes (CSV)</button>
-  <button class="ghost" id="btn-import">Importar YAML</button>
-  <button id="btn-preview">Ver YAML</button>
-  <button class="primary" id="btn-build" style="display:none">▶ Construir curvas</button>
-  <button class="primary" id="btn-export">Descargar curves.yaml</button>
+  <button class="ghost only-curves" id="btn-quotes">Cargar quotes (CSV)</button>
+  <button class="ghost only-curves" id="btn-import">Importar YAML</button>
+  <button class="only-curves" id="btn-preview">Ver YAML</button>
+  <button class="primary only-curves" id="btn-build" style="display:none">▶ Construir curvas</button>
+  <button class="primary only-curves" id="btn-export">Descargar curves.yaml</button>
+  <button class="ghost only-vol" id="btn-vol-quotes" style="display:none">Cargar cotizaciones (CSV)</button>
+  <button class="primary only-vol" id="btn-vol-build" style="display:none">▶ Construir superficies</button>
   <input type="file" id="file-input" accept=".yaml,.yml" hidden>
   <input type="file" id="quotes-input" accept=".csv,.txt" hidden>
 </header>
 
-<div class="wrap">
+<div class="wrap" id="view-curves">
   <nav>
     <div class="rail-section">
       <h2>FX Spots</h2>
@@ -191,6 +243,22 @@
   </nav>
 
   <main id="editor"></main>
+</div>
+
+<div class="wrap" id="view-vol" hidden>
+  <nav>
+    <div class="rail-section" style="padding-bottom:0">
+      <h2>Superficies · por par</h2>
+    </div>
+    <div id="pair-list"></div>
+    <div class="rail-section">
+      <div class="hint" id="vol-rail-note" style="font-size:11px;line-height:1.5">
+        Las convenciones se leen del panel exportado de Calypso, que es la fuente
+        de verdad. La interfaz marca en ámbar lo que se aparta del manual.
+      </div>
+    </div>
+  </nav>
+  <main id="vol-editor"></main>
 </div>
 
 <dialog id="dlg">
@@ -266,6 +334,123 @@ Swap.5Y.USD.SOFR.1D/1Y.LIBOR01,Yield,3.93579,3.93925,3.94271</pre>
         </tr></thead>
         <tbody id="res-body"></tbody>
       </table>
+    </div>
+  </div>
+</dialog>
+
+
+<dialog id="dlg-vol-quotes">
+  <div class="dlg-head">
+    <b>Cargar cotizaciones de volatilidad — un archivo por lado</b>
+    <div class="spacer"></div>
+    <button class="ghost" id="btn-vq-close">Cerrar</button>
+  </div>
+  <div style="padding:16px 18px">
+    <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin-bottom:12px">
+      Calypso exporta <b>un archivo por lado</b> (BID, MID, ASK) con la misma
+      cabecera. Carga los que tengas: <b>MID es obligatorio</b>; si falta bid o
+      ask, ese lado se copia del mid. Al construir, el motor corre el pipeline
+      completo tres veces — el spread atraviesa la conversión delta→strike y la
+      spline, así que no se puede interpolar el mid y sumarle medio spread.
+    </p>
+    <div class="card" style="background:var(--ink);margin-bottom:12px">
+      <h3 style="margin-bottom:8px">Formato esperado</h3>
+      <pre style="font-size:11px;color:var(--cyan);padding:0;max-height:none">Term;Exp;Day;Cal Days;Trade Days;Trade Vol;RR25;RR10;ATM;BF25;BF10
+1W;08/09/2026;TUE;7.00000;7.00000;4.72000;0.72500;1.29000;4.72000;0.24500;0.87500
+1M;01/10/2026;THU;30.00000;30.00000;6.43500;1.36000;2.41000;6.43500;0.29000;1.02500</pre>
+      <p style="color:var(--muted);font-size:11px;margin-top:8px;line-height:1.6">
+        · <b>Trade Days</b> y <b>Trade Vol</b> son opcionales: EUR/USD las omite
+        porque tiene <code>Weighting = false</code>.<br>
+        · Los valores van en <b>puntos de vol</b> (4.72 → 4.72%).<br>
+        · <code>O/N</code> y <code>1D</code> se tratan como el mismo tenor.<br>
+        · Columnas fuera de esa lista (<code>xBF10</code>, <code>xRR10</code>) se ignoran.<br>
+        · Los tres lados deben compartir grilla de tenores y fechas de expiración.
+      </p>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <label for="vq-pair" style="margin:0">Superficie</label>
+      <select id="vq-pair"></select>
+      <span class="status" id="vq-status" style="margin-left:auto"></span>
+    </div>
+    <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:10px">
+      <div><label>BID <span style="text-transform:none;letter-spacing:0">(opcional)</span></label>
+        <textarea id="vq-bid" spellcheck="false" class="vq-ta"></textarea>
+        <button class="ghost vq-file" data-side="bid" style="width:100%;margin-top:6px">Cargar CSV…</button></div>
+      <div><label style="color:var(--amber)">MID (obligatorio)</label>
+        <textarea id="vq-mid" spellcheck="false" class="vq-ta"></textarea>
+        <button class="ghost vq-file" data-side="mid" style="width:100%;margin-top:6px">Cargar CSV…</button></div>
+      <div><label>ASK <span style="text-transform:none;letter-spacing:0">(opcional)</span></label>
+        <textarea id="vq-ask" spellcheck="false" class="vq-ta"></textarea>
+        <button class="ghost vq-file" data-side="ask" style="width:100%;margin-top:6px">Cargar CSV…</button></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+      <button class="primary" id="btn-vq-apply">Validar y aplicar</button>
+      <button class="ghost danger" id="btn-vq-clear">Volver a los archivos del YAML</button>
+    </div>
+    <div id="vq-report" style="margin-top:12px;font-family:var(--mono);
+      font-size:11px;color:var(--muted);max-height:180px;overflow:auto"></div>
+  </div>
+  <input type="file" id="vq-file-input" accept=".csv,.txt" hidden>
+</dialog>
+
+<dialog id="dlg-vol-results">
+  <div class="dlg-head">
+    <b>Superficie de volatilidad</b>
+    <div class="spacer"></div>
+    <span id="vol-res-side" style="font-family:var(--mono);font-weight:700;
+      letter-spacing:.08em;padding:4px 12px;border-radius:4px;margin-right:10px;
+      border:1px solid var(--amber);color:var(--amber)">MID</span>
+    <select id="vol-res-pair" style="margin-right:8px"></select>
+    <select id="vol-res-view" style="margin-right:8px">
+      <option value="cp">Surface &middot; C/P</option>
+      <option value="rrbf">Surface &middot; RR/BF</option>
+      <option value="pbid">Points &middot; BID</option>
+      <option value="pask">Points &middot; ASK</option>
+      <option value="det">Detalle &middot; strikes</option>
+    </select>
+    <button id="btn-vol-cmp">Comparar Calypso&hellip;</button>
+    <button id="btn-vol-csv">Descargar CSV</button>
+    <button class="ghost" id="btn-vol-res-close">Cerrar</button>
+  </div>
+  <div style="padding:14px 18px">
+    <div id="vol-res-summary" style="font-family:var(--mono);font-size:11.5px;
+      color:var(--muted);margin-bottom:10px"></div>
+    <div id="vol-res-cmp" style="display:none;margin-bottom:10px;padding:10px 12px;
+      border:1px solid var(--line);border-radius:5px;background:var(--ink)">
+      <div style="color:var(--muted);font-size:11.5px;line-height:1.6;margin-bottom:8px">
+        Sube o pega el export de Calypso de este par. Acepta <b>Surface C/P</b>,
+        <b>Surface RR/BF</b> y <b>Points BID/ASK</b>; empareja por fecha de vencimiento.
+      </div>
+      <input type="file" id="vol-res-file" accept=".csv,.txt">
+      <textarea id="vol-res-csv" rows="3" placeholder="&hellip;o pega aqui el CSV"
+        style="width:100%;margin-top:8px;font-family:var(--mono);font-size:11px"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="primary" id="btn-vol-cmp-run">Comparar</button>
+        <button class="ghost" id="btn-vol-cmp-clear">Quitar comparacion</button>
+      </div>
+    </div>
+    <div id="vol-res-banner"></div>
+    <div style="overflow:auto;max-height:52vh">
+      <table id="vol-res-table" class="stick" style="font-size:11.5px">
+        <thead id="vol-res-head"></thead><tbody id="vol-res-body"></tbody>
+      </table>
+    </div>
+    <p id="vol-res-foot" style="color:var(--muted);font-size:11px;
+      margin-top:8px;line-height:1.6"></p>
+  </div>
+</dialog>
+
+<dialog id="dlg-vol-sens">
+  <div class="dlg-head">
+    <b id="vol-sens-title">Sensibilidad de convenciones</b>
+    <div class="spacer"></div>
+    <button class="ghost" id="btn-vol-sens-close">Cerrar</button>
+  </div>
+  <div style="padding:14px 18px">
+    <div id="vol-sens-summary" style="font-family:var(--mono);font-size:11.5px;
+      color:var(--muted);margin-bottom:12px"></div>
+    <div style="overflow:auto;max-height:52vh">
+      <table id="vol-sens-table" class="stick" style="font-size:11.5px"></table>
     </div>
   </div>
 </dialog>
@@ -1917,6 +2102,779 @@ $("#btn-res-csv").onclick = async ()=>{
 };
 
 initConfig();
+
+/* ==========================================================================
+   MÓDULO 2 — pestaña de Superficies de Volatilidad
+   ==========================================================================
+   Misma mecánica que la pestaña de curvas: la configuración viene del motor
+   (GET /vol/config), la construcción corre en Python (POST /vol/build) y la
+   interfaz solo muestra. Nada de convenciones hardcodeadas acá: lo que se
+   muestra es lo que el panel de Calypso tiene configurado.                  */
+
+let volCfg = null;        // {valuation_date, surfaces:{PAR:{parameters,quotes,flags}}}
+let volSelected = null;
+let volResults = null;
+let volLoading = false;
+
+function switchView(view){
+  const isVol = view === "vol";
+  $("#view-curves").hidden = isVol;
+  $("#view-vol").hidden = !isVol;
+  $("#tab-curves").classList.toggle("active", !isVol);
+  $("#tab-vol").classList.toggle("active", isVol);
+  document.querySelectorAll(".only-curves").forEach(el=>{
+    el.style.display = isVol ? "none" : "";
+  });
+  document.querySelectorAll(".only-vol").forEach(el=>{
+    el.style.display = isVol ? (window.SERVER_MODE ? "" : "none") : "none";
+  });
+  $("#valdate").parentElement.style.display = isVol ? "none" : "";
+  $("#vol-valdate-wrap").style.display = isVol ? "" : "none";
+  if(isVol && !volCfg && !volLoading) initVol();
+}
+
+async function initVol(){
+  if(!window.SERVER_MODE){
+    $("#vol-editor").innerHTML = `<div class="card"><div class="hint">
+      La pestaña de superficies necesita el servidor: corre
+      <code>python server.py</code> y abre http://127.0.0.1:8000.
+      El motor del Módulo 2 corre en Python, igual que el bootstrapping.
+    </div></div>`;
+    return;
+  }
+  volLoading = true;
+  setStatus("Cargando superficies…");
+  try{
+    const data = await (await fetch("/vol/config")).json();
+    if(!data.ok){
+      $("#vol-editor").innerHTML = `<div class="card"><div class="hint"
+        style="color:var(--red);border-color:var(--red);background:rgba(224,108,108,.08)">
+        ${data.error}</div></div>`;
+      setStatus("Superficies no disponibles","err");
+      return;
+    }
+    volCfg = data;
+    $("#vol-valdate").value = data.valuation_date;
+    volSelected = Object.keys(data.surfaces)[0];
+    renderVolAll();
+    setStatus(`${Object.keys(data.surfaces).length} superficies · valuación ${data.valuation_date}`,"ok");
+  }catch(err){
+    setStatus("No se pudo contactar el servidor: "+err.message,"err");
+  }finally{ volLoading = false; }
+}
+
+function renderVolAll(){ renderVolRail(); renderVolEditor(); }
+
+function renderVolRail(){
+  const el = $("#pair-list");
+  el.innerHTML = Object.entries(volCfg.surfaces).map(([pair,s])=>{
+    const nf = s.flags.length;
+    return `<button class="pair-item ${pair===volSelected?'active':''}" data-pair="${pair}">
+      ${pair}
+      ${nf?`<span class="pill warn" title="${nf} desviación(es) respecto del manual">${nf}</span>`:''}
+      <span class="n">${s.quotes.length}T</span>
+    </button>`;
+  }).join("");
+  el.querySelectorAll(".pair-item").forEach(b=>{
+    b.onclick = ()=>{ volSelected = b.dataset.pair; renderVolAll(); };
+  });
+}
+
+function renderVolEditor(){
+  const s = volCfg.surfaces[volSelected];
+  const p = s.parameters;
+  const dev = new Set(s.flags.map(f=>f.field));
+  const row = k => `<b>${k}</b><span class="v ${dev.has(k)?'dev':''}">${p[k]||'<i style="color:var(--red)">(vacío)</i>'}</span>`;
+
+  const conv = ["Volatility Day Count","Quotes are Delta with Premium",
+                "Spot Delta Last Tenor","ATM Zero Straddle Last Tenor",
+                "Strangle/Fly Quotes","DateCut of Expiries"];
+  const interp = ["Interpolate Outright Variance","Interpolate on Trading Time",
+                  "Up Extrap 1.0 Delta","Down Extrap 1.0 Delta","Weighting",
+                  "Granularity","Roll Method"];
+
+  const q = s.quotes;
+  const hasTD = q.some(r=>r.trade_days!=null);
+
+  $("#vol-editor").innerHTML = `
+    <div class="curve-title">
+      <input value="${volSelected}" readonly style="min-width:220px">
+      <span class="chip">base ${s.base_ccy}</span>
+      <span class="chip">cotizada ${s.quote_ccy}</span>
+      <span class="chip">entrega T+${s.delivery_lag}</span>
+      <span class="chip">${q.length} tenores</span>
+    </div>
+
+    <div class="card">
+      <h3>Convenciones de cotización · panel de Calypso</h3>
+      <div class="kv">${conv.map(row).join("")}</div>
+    </div>
+
+    <div class="card">
+      <h3>Interpolación y rolling</h3>
+      <div class="kv">${interp.map(row).join("")}</div>
+    </div>
+
+
+    <div class="card">
+      <h3>Cotizaciones de mercado${volLoadedSides(volSelected)}</h3>
+      ${q.length ? "" : `<div class="hint" style="border-color:var(--amber);color:var(--amber)">
+        Sin cotizaciones cargadas para ${volSelected}. La interfaz no usa los archivos
+        del repositorio por su cuenta: sube las hojas del día con
+        <b>Cargar cotizaciones (CSV)</b>, o pulsa
+        <b>Usar los datos del repositorio</b> abajo si quieres trabajar con las
+        versionadas del 01/09/2026.</div>`}
+      <div style="overflow:auto;max-height:340px;${q.length?"":"display:none"}">
+        <table class="stick" style="font-size:11.5px">
+          <thead><tr>
+            <th>Tenor</th><th>Expiry</th><th class="num">Cal Days</th>
+            ${hasTD?'<th class="num">Trade Days</th>':''}
+            <th class="num">ATM</th><th class="num">RR25</th><th class="num">RR10</th>
+            <th class="num">BF25</th><th class="num">BF10</th>
+            <th class="num">σ 25C</th><th class="num">σ 25P</th>
+          </tr></thead>
+          <tbody>${q.map(r=>`<tr>
+            <td>${r.term_raw}</td><td>${r.expiry}</td>
+            <td class="num">${r.cal_days.toFixed(0)}</td>
+            ${hasTD?`<td class="num">${r.trade_days!=null?r.trade_days.toFixed(3):'—'}</td>`:''}
+            <td class="num" style="color:var(--amber)">${r.atm.toFixed(3)}</td>
+            <td class="num">${r.rr25.toFixed(3)}</td><td class="num">${r.rr10.toFixed(3)}</td>
+            <td class="num">${r.bf25.toFixed(3)}</td><td class="num">${r.bf10.toFixed(3)}</td>
+            <td class="num" style="color:var(--cyan)">${(r.atm+r.bf25+r.rr25/2).toFixed(3)}</td>
+            <td class="num" style="color:var(--cyan)">${(r.atm+r.bf25-r.rr25/2).toFixed(3)}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+      <p style="color:var(--muted);font-size:11px;margin-top:8px;line-height:1.6">
+        σ 25C y σ 25P se derivan por álgebra directa de la convención
+        <code style="color:var(--amber)">2vol (CP Avg)</code>:
+        σ_call = ATM + BF + RR/2 · σ_put = ATM + BF − RR/2.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Tipo de cambio · spot del día</h3>
+      <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-bottom:12px">
+        El spot multiplica al forward, así que fija <b>todos</b> los strikes de la
+        superficie. Sube el archivo del día, o teclea el valor con precisión completa:
+        el export de Calypso viene redondeado a 2 decimales y solo en USD/MXN eso ya
+        son ~3 pb de incertidumbre en cada strike.
+      </p>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <input type="file" id="fx-file" accept=".csv,.txt">
+        <button id="btn-fx-clear">Vaciar</button>
+        <span id="fx-note" style="color:var(--muted);font-size:11.5px"></span>
+      </div>
+      <div id="fx-table"></div>
+    </div>
+
+    <div class="card">
+      <h3>Resultados de la superficie</h3>
+      <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-bottom:12px">
+        Abre la superficie de este par en el formato de Calypso —Surface C/P,
+        Surface RR/BF y Points BID/ASK— y compárala contra el export de Calypso.
+      </p>
+      <button class="primary" id="btn-open-res">Ver superficie de ${volSelected}</button>
+      <button id="btn-repo-data" style="margin-left:8px">Usar los datos del repositorio</button>
+      <p style="color:var(--muted);font-size:11px;line-height:1.6;margin-top:10px">
+        «Usar los datos del repositorio» carga las hojas versionadas del 01/09/2026
+        en la interfaz, igual que si las subieras a mano — quedan visibles arriba y
+        puedes reemplazarlas. Nada se construye con datos que no estén cargados aquí.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Consultar volatilidad implícita</h3>
+      <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-bottom:12px">
+        Para saber la vol de una operación hacen falta su <b>vencimiento</b> y su
+        <b>strike</b>: la superficie interpola en plazo y en delta hasta ese punto.
+        Es exactamente lo que el Módulo 3 va a pedirle a esta superficie para
+        valorizar cada opción del portafolio.
+      </p>
+      <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
+        <div><label for="q-expiry">Vencimiento</label>
+          <input type="date" id="q-expiry" style="width:100%"></div>
+        <div><label for="q-mode">Consultar por</label>
+          <select id="q-mode" style="width:100%">
+            <option value="strike">Strike</option>
+            <option value="delta">Call delta (%)</option>
+          </select></div>
+        <div><label for="q-value" id="q-value-lbl">Strike</label>
+          <input type="number" id="q-value" step="any" style="width:100%"></div>
+        <div style="display:flex;align-items:flex-end">
+          <button class="primary" id="btn-vol-query" style="width:100%">Consultar</button></div>
+      </div>
+      <div id="q-result" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Análisis de sensibilidad de convenciones</h3>
+      <p style="color:var(--muted);font-size:12px;line-height:1.6;margin-bottom:12px">
+        Construye este par dos veces —con su configuración actual y con la que
+        recomienda el manual para pares emergentes— y compara los strikes
+        resultantes. Es lo que convierte un hallazgo de configuración en un número.
+      </p>
+      <button id="btn-vol-sens">Comparar contra convención de emergentes (0D / 0D)</button>
+    </div>
+
+    ${s.flags.length ? `<details class="card" style="padding-top:14px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:12px;
+        letter-spacing:.04em;text-transform:uppercase">
+        Se aparta del manual Calypso · ${s.flags.length}</summary>
+      <div style="margin-top:12px">
+      ${s.flags.map(f=>`<div class="flag">
+        <code>${f.field}</code> = <b>${f.value}</b> · recomendado <code>${f.recommended}</code>
+        <span class="why">${f.why}</span></div>`).join("")}
+      <p style="color:var(--muted);font-size:11.5px;line-height:1.6;margin-top:8px">
+        No son errores: el manual insiste en que estas convenciones las define la mesa.
+        Son observaciones sobre <b>cómo está configurado Calypso</b>, para pedir la
+        justificación a la mesa — no describen lo que hace este motor. En particular
+        <code>Up/Down Extrap 1.0 Delta</code> ya no tiene contraparte en el motor: el ala
+        del smile se validó contra la malla de 5 en 5 deltas y quedó como extensión
+        lineal tangente. Para medir el impacto de las que sí mueven la superficie
+        (<code>Spot Delta Last Tenor</code> y <code>ATM Zero Straddle Last Tenor</code>)
+        usa <b>Sensibilidad</b>.
+      </p>
+      </div>
+    </details>` : ""}`;
+
+  // valores por defecto útiles: el vencimiento del tenor 1Y y un strike ATM
+  const oneY = q.find(r=>r.tenor==="1Y") || q[Math.floor(q.length/2)];
+  if(oneY) $("#q-expiry").value = oneY.expiry;
+  $("#q-mode").onchange = e=>{
+    const isK = e.target.value === "strike";
+    $("#q-value-lbl").textContent = isK ? "Strike" : "Call delta (%)";
+    $("#q-value").value = isK ? "" : 25;
+  };
+  $("#btn-vol-query").onclick = runVolQuery;
+
+  renderFxTable();
+  $("#btn-fx-clear").onclick = ()=>{ volSpots = {}; renderFxTable(); };
+  $("#btn-repo-data").onclick = loadRepoData;
+  $("#fx-file").onchange = async e=>{
+    const f = e.target.files[0]; if(!f) return;
+    await loadFxSpots(await f.text(), f.name);
+  };
+  $("#btn-open-res").onclick = ()=> openVolResults(volSelected);
+
+  const b = $("#btn-vol-sens");
+  if(b) b.onclick = ()=> runVolSensitivity(volSelected,
+        {"Spot Delta Last Tenor":"0D","ATM Zero Straddle Last Tenor":"0D"},
+        "convención de mercado emergente (0D / 0D)");
+}
+
+async function buildVolOnServer(){
+  const btn = $("#btn-vol-build");
+  btn.disabled = true; btn.textContent = "Construyendo…";
+  setStatus("Construyendo superficies (bid/mid/ask)…");
+  try{
+    const resp = await fetch("/vol/build", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({valuation_date: $("#vol-valdate").value || undefined,
+                            ...volQuotesPayload()})});
+    const data = await resp.json();
+    if(!data.ok){
+      setStatus("Error de construcción: "+(data.error||"desconocido"),"err");
+      console.error(data.trace); return;
+    }
+    volResults = data;
+    const nErr = Object.keys(data.errors).length;
+    setStatus(`Construidas ${data.pairs.length-nErr}/${data.pairs.length} superficies × 3 lados`,
+              nErr?"":"ok");
+    openVolResults();
+  }catch(err){
+    setStatus("No se pudo contactar el servidor: "+err.message,"err");
+  }finally{
+    btn.disabled = false; btn.textContent = "▶ Construir superficies";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tipo de cambio — spot del día
+// ---------------------------------------------------------------------------
+let volSpots   = {};      // {PAR:{bid,ask}} — lo que se manda al servidor
+
+async function loadFxSpots(csv, filename){
+  const note = $("#fx-note");
+  if(note) note.textContent = csv ? "Leyendo archivo…" : "Cargando…";
+  try{
+    const d = await (await fetch("/vol/fx-spots",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({csv, filename,
+        valuation_date: $("#vol-valdate").value || undefined})})).json();
+    if(d.parsed){
+      let n = 0;
+      for(const [pr,v] of Object.entries(d.parsed)){
+        if((d.pairs||[]).includes(pr)){ volSpots[pr] = {bid:v.bid, ask:v.ask}; n++; }
+      }
+      if(note) note.textContent = d.error ? "" :
+        `${n} de ${(d.pairs||[]).length} pares actualizados desde ${filename||"el archivo"}.`;
+    }
+    if(d.error && note) note.textContent = "";
+    renderFxTable(d.error);
+  }catch(e){ if(note) note.textContent = String(e); }
+}
+
+function fxEffective(pair){
+  const v = volSpots[pair];
+  if(!v) return null;
+  return (v.bid!=null && v.ask!=null) ? (v.bid+v.ask)/2 : (v.bid!=null?v.bid:v.ask);
+}
+
+// Qué lados hay cargados para un par — se muestra en el título de la tarjeta de
+// cotizaciones para que nunca haya duda de qué está alimentando la superficie.
+function volLoadedSides(pair){
+  const u = volUploaded[pair] || {};
+  const sides = ["bid","mid","ask"].filter(k => (u[k]||"").trim());
+  if(!sides.length) return ` · <span style="color:var(--amber)">sin cargar</span>`;
+  const falt = ["bid","ask"].filter(k => !sides.includes(k));
+  return ` · <span style="color:var(--cyan)">${sides.join(" / ")}</span>`
+    + (falt.length ? ` <span style="color:var(--muted)">(${falt.join(" y ")} = mid)</span>` : "");
+}
+
+function renderFxTable(err){
+  const box = $("#fx-table"); if(!box) return;
+  const pairs = volCfg ? Object.keys(volCfg.surfaces) : [];
+  const rows = pairs.map(p=>{
+    const eff = fxEffective(p);
+    return `<tr>
+      <td>${p}</td>
+      <td><input type="number" step="any" data-fx="${p}"
+           value="${eff!=null? eff : ""}" placeholder="sin cargar"
+           style="width:170px;font-family:var(--mono)"></td>
+      <td style="color:${eff!=null?"var(--cyan)":"var(--amber)"};font-size:11px">
+        ${eff!=null ? "cargado" : "sin cargar"}</td>
+    </tr>`;
+  }).join("");
+  const faltan = pairs.filter(p => fxEffective(p)==null);
+  box.innerHTML = (err?`<div class="hint" style="color:var(--red);border-color:var(--red);
+      background:rgba(224,108,108,.08);margin-bottom:10px">${err}</div>`:"")
+    + (faltan.length?`<div class="hint" style="border-color:var(--amber);color:var(--amber);
+        margin-bottom:10px">Faltan spots: ${faltan.join(", ")}. Sin ellos no se puede
+        construir la superficie de esos pares.</div>`:"")
+    + `<table class="stick" style="font-size:11.5px">
+      <thead><tr><th>Par</th><th>Spot</th><th>Estado</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <p style="color:var(--muted);font-size:11px;margin-top:8px;line-height:1.6">
+      Nada viene precargado: el motor solo usa lo que aparece en esta tabla.</p>`;
+  box.querySelectorAll("input[data-fx]").forEach(inp=>{
+    inp.onchange = ()=>{
+      const pr = inp.dataset.fx, v = parseFloat(inp.value);
+      if(inp.value === "" || !isFinite(v)) delete volSpots[pr];
+      else volSpots[pr] = {bid:v, ask:v};
+      renderFxTable();
+    };
+  });
+}
+
+// Carga explícita de los archivos versionados del repositorio. Pasa por el mismo
+// estado que una carga manual, así que después se ven y se pueden reemplazar.
+async function loadRepoData(){
+  const btn = $("#btn-repo-data");
+  if(btn){ btn.disabled = true; btn.textContent = "Cargando…"; }
+  try{
+    const d = await (await fetch("/vol/repo-data")).json();
+    if(!d.ok){ setStatus("No pude leer los datos del repositorio: "+d.error,"err"); return; }
+    for(const [pr,v] of Object.entries(d.fx_spots||{})) volSpots[pr] = v;
+    let n = 0;
+    for(const [pr,sides] of Object.entries(d.quotes_csv||{})){
+      volUploaded[pr] = sides; n++;
+      try{
+        const r = await (await fetch("/vol/validate-quotes",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({pair:pr, quotes:sides,
+            valuation_date: $("#vol-valdate").value || undefined})})).json();
+        if(r.ok && volCfg.surfaces[pr]) volCfg.surfaces[pr].quotes = r.quotes;
+      }catch(e){}
+    }
+    setStatus(`Datos del repositorio cargados: ${n} pares (valuación ${d.valuation_date})`,"ok");
+    renderVolEditor();
+  }finally{
+    if($("#btn-repo-data")){ $("#btn-repo-data").disabled = false;
+      $("#btn-repo-data").textContent = "Usar los datos del repositorio"; }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resultados en el formato de Calypso
+// ---------------------------------------------------------------------------
+let volPillarData = null;      // respuesta de /vol/pillars del par abierto
+let volCmpCsv = "";            // export de Calypso pegado o subido
+
+// Cada vista replica una pestaña del export de Calypso: mismo orden de columnas
+// y mismos encabezados, para poder leerlas una al lado de la otra.
+const VOL_VIEWS = {
+  cp:   {side:"mid", key:"cp",
+         cols:["P10","P25","ATM","C25","C10"], head:["P10","P25","ATM","C25","C10"],
+         foot:"Vista Call/Put de la pestaña Surface: la volatilidad de cada punto cotizado del smile."},
+  rrbf: {side:"mid", key:"rrbf",
+         cols:["ATM","RR25","RR10","BF25","BF10"], head:["ATM","RR25","RR10","BF25","BF10"],
+         foot:"Vista RR/BF: la misma superficie en estrategias — RR = call − put, BF = (call+put)/2 − ATM."},
+  pbid: {side:"bid", key:"cp",
+         cols:["C10","C25","ATM","P25","P10"], head:["10","25","C (ATM) P","25","10"],
+         foot:"Vista Points del lado BID, con el orden de columnas de Calypso: call 10 y 25, ATM, put 25 y 10."},
+  pask: {side:"ask", key:"cp",
+         cols:["C10","C25","ATM","P25","P10"], head:["10","25","C (ATM) P","25","10"],
+         foot:"Vista Points del lado ASK. El mid es exactamente el promedio de BID y ASK."},
+};
+
+function volFmtDate(iso){
+  const p = String(iso).split("-");
+  return p.length===3 ? `${p[2]}/${p[1]}/${p[0]}` : String(iso);
+}
+
+async function openVolResults(pair){
+  const sel = $("#vol-res-pair");
+  const pairs = Object.keys(volCfg.surfaces);
+  sel.innerHTML = pairs.map(p=>`<option value="${p}">${p}</option>`).join("");
+  const want = pair || volSelected;
+  sel.value = pairs.includes(want) ? want : pairs[0];
+  $("#dlg-vol-results").showModal();
+  await loadVolResults();
+}
+
+async function loadVolResults(){
+  const pair = $("#vol-res-pair").value;
+  $("#vol-res-summary").textContent = "Construyendo…";
+  $("#vol-res-body").innerHTML = ""; $("#vol-res-head").innerHTML = "";
+  $("#vol-res-banner").innerHTML = ""; $("#vol-res-foot").textContent = "";
+  try{
+    const d = await (await fetch("/vol/pillars",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({pair, valuation_date: $("#vol-valdate").value || undefined,
+        calypso_csv: volCmpCsv || undefined, ...volQuotesPayload()})})).json();
+    if(!d.ok){
+      volPillarData = null;
+      $("#vol-res-summary").innerHTML = `<span style="color:var(--red)">${d.error}</span>`;
+      return;
+    }
+    volPillarData = d;
+    renderVolResultTable();
+  }catch(e){
+    $("#vol-res-summary").innerHTML = `<span style="color:var(--red)">${e}</span>`;
+  }
+}
+
+function volDiffColor(d){
+  const a = Math.abs(d);
+  if(a < 0.0005) return "var(--green, #6fbf73)";
+  if(a < 0.05)   return "var(--amber)";
+  return "var(--red)";
+}
+
+const SIDE_COLOR = {mid:"var(--amber)", bid:"var(--cyan)", ask:"var(--red)"};
+
+function setSideChip(side){
+  const el = $("#vol-res-side"); if(!el) return;
+  const c = SIDE_COLOR[side] || "var(--muted)";
+  el.textContent = side === "—" ? "BID · MID · ASK" : side.toUpperCase();
+  el.style.color = c; el.style.borderColor = c;
+}
+
+function renderVolResultTable(){
+  if(!volPillarData) return;
+  const d = volPillarData;
+  const vkey = $("#vol-res-view").value;
+  setSideChip(vkey === "det" ? "—" : VOL_VIEWS[vkey].side);
+
+  if(vkey === "det"){
+    const pts = ["P10","P25","ATM","C25","C10"];
+    $("#vol-res-head").innerHTML = `<tr><th>Expiry</th><th>Term / Delta</th><th>Punto</th>
+      <th class="num">Strike</th><th class="num">Vol BID</th><th class="num">Vol MID</th>
+      <th class="num">Vol ASK</th></tr>`;
+    $("#vol-res-body").innerHTML = d.rows.map(r=> pts.map(k=>`<tr>
+        <td>${volFmtDate(r.expiry)}</td><td>${r.tenor}</td>
+        <td style="color:var(--cyan)">${k}</td>
+        <td class="num" style="color:var(--amber)">${r.strike[k]!=null?r.strike[k].toFixed(5):"—"}</td>
+        <td class="num">${r.cp.bid[k].toFixed(4)}</td>
+        <td class="num" style="color:var(--amber)">${r.cp.mid[k].toFixed(4)}</td>
+        <td class="num">${r.cp.ask[k].toFixed(4)}</td></tr>`).join("")).join("");
+    $("#vol-res-foot").textContent = "Vista propia, no de Calypso: agrega el strike de "
+      + "cada punto, que es lo que necesita el Módulo 3 para valorizar.";
+    $("#vol-res-banner").innerHTML = "";
+  }else{
+    const v = VOL_VIEWS[vkey];
+    const hasCly = d.rows.some(r => r[v.key].calypso);
+    $("#vol-res-head").innerHTML = `<tr><th>Expiry</th><th>Term / Delta</th>` +
+      v.head.map(h=>`<th class="num">${h}</th>`).join("") + `</tr>`;
+    $("#vol-res-body").innerHTML = d.rows.map(r=>{
+      const val = r[v.key][v.side], c = r[v.key].calypso;
+      const cells = v.cols.map(k=>{
+        const t = val[k].toFixed(4);
+        if(!c) return `<td class="num">${t}</td>`;
+        let diff = val[k] - c[k];
+        if(Math.abs(diff) < 5e-5) diff = 0;
+        const txt = diff === 0 ? "0.0000" : (diff>0?"+":"") + diff.toFixed(4);
+        return `<td class="num">${t}<div style="font-size:10px;color:${volDiffColor(diff)}">${txt}</div></td>`;
+      }).join("");
+      return `<tr><td>${volFmtDate(r.expiry)}</td><td>${r.tenor}</td>${cells}</tr>`;
+    }).join("");
+    $("#vol-res-foot").textContent = v.foot +
+      (hasCly ? " El número pequeño bajo cada valor es propio − Calypso." : "");
+
+    // Aviso cuando el bid/ask NO son reales: la mesa cargó solo el mid.
+    const mirrored = d.sides_note && (vkey === "pbid" || vkey === "pask");
+    const cinfo = d.calypso || {};
+    if(mirrored){
+      $("#vol-res-banner").innerHTML = `<div class="hint" style="margin-bottom:10px;
+        border-color:var(--amber);color:var(--amber)">${d.sides_note}</div>`;
+    }else if(cinfo.error){
+      $("#vol-res-banner").innerHTML = `<div class="hint" style="color:var(--red);
+        border-color:var(--red);background:rgba(224,108,108,.08);margin-bottom:10px">
+        No pude leer el CSV de Calypso: ${cinfo.error}</div>`;
+    }else if(hasCly){
+      let worst = 0, id = null;
+      for(const r of d.rows){
+        const c = r[v.key].calypso; if(!c) continue;
+        for(const k of v.cols){
+          const diff = Math.abs(r[v.key][v.side][k] - c[k]);
+          if(diff > worst){ worst = diff; id = `${r.tenor} ${k}`; }
+        }
+      }
+      $("#vol-res-banner").innerHTML =
+        (d.sides_note?`<div class="hint" style="margin-bottom:10px;border-color:var(--amber);
+          color:var(--amber)">${d.sides_note}</div>`:"") +
+        `<div class="hint" style="margin-bottom:10px;
+        border-color:${worst<0.0005?"var(--cyan)":"var(--amber)"}">
+        <b>${cinfo.matched} de ${cinfo.total}</b> tenores emparejados con el export de Calypso ·
+        máx |diferencia| = <b style="color:${volDiffColor(worst)}">${worst.toFixed(5)}</b> vol pts
+        ${id?`(en ${id})`:""}${worst<0.0005?" · reproduce Calypso dentro del redondeo del export":""}
+        · comparando contra el lado <b>${v.side}</b></div>`;
+    }else{
+      $("#vol-res-banner").innerHTML = d.sides_note
+        ? `<div class="hint" style="margin-bottom:10px;border-color:var(--amber);
+           color:var(--amber)">${d.sides_note}</div>` : "";
+    }
+  }
+
+  const c0 = d.rows[0] || {};
+  const sideTxt = vkey === "det" ? "bid, mid y ask" : VOL_VIEWS[vkey].side.toUpperCase();
+  $("#vol-res-summary").innerHTML =
+    `<b style="color:var(--amber)">${d.pair}</b> · lado
+     <b style="color:${vkey==="det"?"var(--muted)":SIDE_COLOR[VOL_VIEWS[vkey].side]}">${sideTxt}</b>
+     · valuación ${d.valuation_date}
+     · spot ${d.spot} · ${d.rows.length} tenores
+     ${d.calendar?`· calendario ${d.calendar}`:""}
+     · delta <b>${c0.delta_convention||""}</b>`;
+}
+
+async function runVolQuery(){
+  const expiry = $("#q-expiry").value;
+  const raw = $("#q-value").value;
+  const box = $("#q-result");
+  if(!expiry || raw===""){
+    box.innerHTML = `<div class="hint">Indica vencimiento y ${$("#q-mode").value==="strike"?"strike":"delta"}.</div>`;
+    return;
+  }
+  const body = {pair: volSelected, expiry,
+                valuation_date: $("#vol-valdate").value || undefined,
+                ...volQuotesPayload()};
+  if($("#q-mode").value === "strike") body.strike = parseFloat(raw);
+  else body.call_delta = parseFloat(raw);
+  box.innerHTML = `<div class="hint">Consultando…</div>`;
+  try{
+    const d = await (await fetch("/vol/query",{method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)})).json();
+    if(!d.ok){ box.innerHTML = `<div class="hint" style="color:var(--red);
+      border-color:var(--red);background:rgba(224,108,108,.08)">${d.error}</div>`; return; }
+    const m = d.sides.mid, bi = d.sides.bid, a = d.sides.ask;
+    const br = d.bracket;
+    box.innerHTML = `
+      <div style="display:flex;gap:26px;align-items:baseline;flex-wrap:wrap;
+        border:1px solid var(--line);border-radius:5px;padding:14px 16px;background:var(--ink)">
+        <div><label style="margin-bottom:2px">Vol implícita (mid)</label>
+          <div style="font-family:var(--mono);font-size:26px;color:var(--amber)">
+            ${m.vol_pct.toFixed(4)}<span style="font-size:15px;color:var(--muted)"> %</span></div></div>
+        <div><label style="margin-bottom:2px">bid / ask</label>
+          <div style="font-family:var(--mono);font-size:14px">
+            ${bi.vol_pct.toFixed(4)} / ${a.vol_pct.toFixed(4)}</div></div>
+        <div><label style="margin-bottom:2px">Strike</label>
+          <div style="font-family:var(--mono);font-size:14px">${m.strike.toFixed(6)}</div></div>
+        <div><label style="margin-bottom:2px">Forward</label>
+          <div style="font-family:var(--mono);font-size:14px">${m.forward.toFixed(6)}</div></div>
+        <div><label style="margin-bottom:2px">Call delta</label>
+          <div style="font-family:var(--mono);font-size:14px">${m.call_delta.toFixed(2)}</div></div>
+        <div><label style="margin-bottom:2px">Moneyness K/F</label>
+          <div style="font-family:var(--mono);font-size:14px">${m.moneyness.toFixed(6)}</div></div>
+      </div>
+      <div class="kv" style="margin-top:12px">
+        <b>Valuación</b><span class="v">${d.valuation_date}</span>
+        <b>Vencimiento</b><span class="v">${d.expiry} · τ = ${d.tau.toFixed(6)} años (${d.vol_day_count})</span>
+        <b>Entrega</b><span class="v">${d.delivery}</span>
+        <b>Convención de delta</b><span class="v">${d.delta_convention}</span>
+        <b>Interpolado entre</b><span class="v">${
+          br.extrapolated
+            ? `<span style="color:var(--amber)">fuera de la grilla cotizada — extrapolado con vol plana desde ${br.lower||br.upper} (${br.lower_expiry||br.upper_expiry})</span>`
+            : (br.lower===br.upper
+                ? `${br.lower} (${br.lower_expiry}) — pilar exacto`
+                : `${br.lower} (${br.lower_expiry}) y ${br.upper} (${br.upper_expiry})`)}</span>
+      </div>`;
+  }catch(err){
+    box.innerHTML = `<div class="hint" style="color:var(--red)">${err.message}</div>`;
+  }
+}
+
+async function runVolSensitivity(pair, overrides, label){
+  setStatus(`Comparando ${pair} contra ${label}…`);
+  try{
+    const resp = await fetch("/vol/sensitivity", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({pair, overrides, ...volQuotesPayload()})});
+    const d = await resp.json();
+    if(!d.ok){ setStatus("Error: "+(d.error||"desconocido"),"err"); return; }
+    const pts = ["10C","25C","ATM","25P","10P"];
+    $("#vol-sens-title").textContent = `${pair} — actual vs. ${label}`;
+    $("#vol-sens-summary").innerHTML =
+      `Desplazamiento máximo de strike: <b style="color:var(--amber)">${d.worst_pct.toFixed(3)}%</b>
+       · overrides: <code>${Object.entries(overrides).map(([k,v])=>k+'='+v).join(' · ')}</code>`;
+    $("#vol-sens-table").innerHTML = `
+      <thead><tr><th>Tenor</th><th>Expiry</th>
+        ${pts.map(p=>`<th class="num">${p} actual</th><th class="num">${p} alt</th><th class="num">dif</th>`).join("")}
+      </tr></thead>
+      <tbody>${d.rows.map(r=>`<tr><td>${r.tenor}</td><td>${r.expiry}</td>
+        ${pts.map(p=>{
+          const c=r[p], big=Math.abs(c.diff_pct)>0.5;
+          return `<td class="num">${c.base.toFixed(4)}</td><td class="num">${c.alt.toFixed(4)}</td>
+                  <td class="num" style="color:${big?'var(--amber)':'var(--muted)'}">${c.diff_pct>=0?'+':''}${c.diff_pct.toFixed(3)}%</td>`;
+        }).join("")}</tr>`).join("")}</tbody>`;
+    $("#dlg-vol-sens").showModal();
+    setStatus("Sensibilidad calculada","ok");
+  }catch(err){ setStatus("No se pudo contactar el servidor: "+err.message,"err"); }
+}
+
+
+/* ---------------------- carga de cotizaciones (Módulo 2) ------------------ */
+/* Las hojas cargadas viven en el navegador, igual que la config de curvas, y
+   se mandan al motor en cada build/consulta. No se escribe nada a disco: el
+   YAML sigue apuntando a los archivos originales. */
+let volUploaded = {};      // {PAR: {bid,mid,ask}}
+
+function volQuotesPayload(){
+  // Todo lo que la mesa carga desde la interfaz y que debe viajar en CADA
+  // llamada al motor: cotizaciones subidas y tipo de cambio del día.
+  const out = {strict_uploads: true};   // nada se construye con datos no cargados
+  if(Object.keys(volUploaded).length) out.quotes_csv = volUploaded;
+  if(Object.keys(volSpots).length)    out.fx_spots   = volSpots;
+  return out;
+}
+
+function openVolQuotes(){
+  const sel = $("#vq-pair");
+  sel.innerHTML = Object.keys(volCfg.surfaces)
+    .map(p=>`<option value="${p}">${p}</option>`).join("");
+  sel.value = volSelected;
+  loadVqTextareas();
+  $("#dlg-vol-quotes").showModal();
+}
+
+function loadVqTextareas(){
+  const up = volUploaded[$("#vq-pair").value] || {};
+  ["bid","mid","ask"].forEach(k=> $("#vq-"+k).value = up[k] || "");
+  $("#vq-report").innerHTML = "";
+  $("#vq-status").textContent = up.mid ? "hoja cargada para este par" : "";
+  $("#vq-status").className = "status" + (up.mid ? " ok" : "");
+}
+
+async function applyVolQuotes(){
+  const pair = $("#vq-pair").value;
+  const quotes = {bid:$("#vq-bid").value, mid:$("#vq-mid").value, ask:$("#vq-ask").value};
+  if(!quotes.mid.trim()){
+    $("#vq-status").textContent = "falta el lado MID"; $("#vq-status").className="status err"; return;
+  }
+  $("#vq-status").textContent = "validando…"; $("#vq-status").className="status";
+  try{
+    const d = await (await fetch("/vol/validate-quotes",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({pair, quotes, valuation_date: $("#vol-valdate").value || undefined})
+    })).json();
+    if(!d.ok){
+      $("#vq-status").textContent = "error"; $("#vq-status").className="status err";
+      $("#vq-report").innerHTML = `<span style="color:var(--red)">${d.error}</span>`;
+      return;
+    }
+    volUploaded[pair] = {};
+    ["bid","mid","ask"].forEach(k=>{ if(quotes[k].trim()) volUploaded[pair][k]=quotes[k]; });
+    // refresca la tabla de cotizaciones del par con lo recién cargado
+    volCfg.surfaces[pair].quotes = d.quotes;
+    if(pair === volSelected) renderVolEditor();
+    const n = d.n_tenors.mid;
+    $("#vq-status").textContent = `${n} tenores · lados ${d.sides_loaded.join(", ")}`;
+    $("#vq-status").className = "status ok";
+    $("#vq-report").innerHTML =
+      `<div style="color:var(--green)">✓ ${n} tenores leídos para ${pair} · lados cargados: ${d.sides_loaded.join(", ")}</div>` +
+      (d.warnings.length
+        ? `<div style="margin-top:8px;color:var(--amber)">${d.warnings.length} aviso(s):<br>` +
+          d.warnings.map(w=>"! "+w).join("<br>") + `</div>`
+        : `<div style="margin-top:6px">Sin avisos: varianza total creciente, convexidad OK, fechas coherentes.</div>`);
+    setStatus(`Cotizaciones de ${pair} cargadas (${n} tenores)`,"ok");
+  }catch(err){
+    $("#vq-status").textContent = "error de red"; $("#vq-status").className="status err";
+    $("#vq-report").innerHTML = `<span style="color:var(--red)">${err.message}</span>`;
+  }
+}
+
+$("#btn-vol-quotes").onclick = ()=> volCfg ? openVolQuotes()
+  : setStatus("Espera a que carguen las superficies","err");
+$("#btn-vq-close").onclick = ()=> $("#dlg-vol-quotes").close();
+$("#vq-pair").onchange = loadVqTextareas;
+$("#btn-vq-apply").onclick = applyVolQuotes;
+$("#btn-vq-clear").onclick = async ()=>{
+  const pair = $("#vq-pair").value;
+  delete volUploaded[pair];
+  ["bid","mid","ask"].forEach(k=> $("#vq-"+k).value="");
+  const data = await (await fetch("/vol/config")).json();
+  if(data.ok){ volCfg.surfaces[pair].quotes = data.surfaces[pair].quotes;
+               if(pair===volSelected) renderVolEditor(); }
+  $("#vq-status").textContent = "volvió a los archivos del YAML";
+  $("#vq-status").className = "status";
+  $("#vq-report").innerHTML = "";
+};
+let vqSide = null;
+document.querySelectorAll(".vq-file").forEach(b=>{
+  b.onclick = ()=>{ vqSide = b.dataset.side; $("#vq-file-input").click(); };
+});
+$("#vq-file-input").onchange = e=>{
+  const f = e.target.files[0]; if(!f || !vqSide) return;
+  const r = new FileReader();
+  r.onload = ev=>{ $("#vq-"+vqSide).value = ev.target.result; };
+  r.readAsText(f);
+  e.target.value = "";
+};
+
+document.querySelectorAll(".tab").forEach(t=> t.onclick = ()=> switchView(t.dataset.view));
+$("#btn-vol-build").onclick = buildVolOnServer;
+$("#vol-res-pair").onchange = loadVolResults;
+$("#vol-res-view").onchange = renderVolResultTable;
+$("#btn-vol-cmp").onclick = ()=>{
+  const box = $("#vol-res-cmp");
+  box.style.display = box.style.display === "none" ? "block" : "none";
+};
+$("#vol-res-file").onchange = async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $("#vol-res-csv").value = await f.text();
+};
+$("#btn-vol-cmp-run").onclick = ()=>{
+  volCmpCsv = ($("#vol-res-csv").value || "").trim();
+  loadVolResults();
+};
+$("#btn-vol-cmp-clear").onclick = ()=>{
+  volCmpCsv = ""; $("#vol-res-csv").value = ""; $("#vol-res-file").value = "";
+  loadVolResults();
+};
+$("#btn-vol-res-close").onclick = ()=> $("#dlg-vol-results").close();
+$("#btn-vol-sens-close").onclick = ()=> $("#dlg-vol-sens").close();
+$("#btn-vol-csv").onclick = async ()=>{
+  const pair = $("#vol-res-pair").value;
+  const resp = await fetch("/vol/export-csv", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({pair, ...volQuotesPayload()})});
+  const text = await resp.text();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text],{type:"text/csv"}));
+  a.download = pair+"_surface.csv"; a.click(); URL.revokeObjectURL(a.href);
+};
+if (window.SERVER_MODE) $("#btn-vol-build").style.display = "none";  // solo visible en la pestaña de vol
+switchView("curves");
 </script>
 </body>
 </html>

@@ -1,0 +1,66 @@
+Id;Type;Description
+4474219;FXOpt;EUR/USD 1D ATM
+4474221;FXOpt;EUR/USD 1D Butterfly 25-delta
+4474223;FXOpt;EUR/USD 1D Risk Reversal 25-delta
+4474220;FXOpt;EUR/USD 1D Butterfly 10-delta
+4474222;FXOpt;EUR/USD 1D Risk Reversal 10-delta
+3767;FXOpt;EUR/USD 1W ATM
+24972;FXOpt;EUR/USD 1W Butterfly 25-delta
+24946;FXOpt;EUR/USD 1W Risk Reversal 25-delta
+24959;FXOpt;EUR/USD 1W Butterfly 10-delta
+24933;FXOpt;EUR/USD 1W Risk Reversal 10-delta
+27187;FXOpt;EUR/USD 2W ATM
+27197;FXOpt;EUR/USD 2W Butterfly 25-delta
+27192;FXOpt;EUR/USD 2W Risk Reversal 25-delta
+4474245;FXOpt;EUR/USD 2W Butterfly 10-delta
+4474247;FXOpt;EUR/USD 2W Risk Reversal 10-delta
+27188;FXOpt;EUR/USD 3W ATM
+27198;FXOpt;EUR/USD 3W Butterfly 25-delta
+27193;FXOpt;EUR/USD 3W Risk Reversal 25-delta
+4474260;FXOpt;EUR/USD 3W Butterfly 10-delta
+4474262;FXOpt;EUR/USD 3W Risk Reversal 10-delta
+3768;FXOpt;EUR/USD 1M ATM
+24973;FXOpt;EUR/USD 1M Butterfly 25-delta
+24947;FXOpt;EUR/USD 1M Risk Reversal 25-delta
+24960;FXOpt;EUR/USD 1M Butterfly 10-delta
+24934;FXOpt;EUR/USD 1M Risk Reversal 10-delta
+3769;FXOpt;EUR/USD 2M ATM
+24974;FXOpt;EUR/USD 2M Butterfly 25-delta
+24948;FXOpt;EUR/USD 2M Risk Reversal 25-delta
+24961;FXOpt;EUR/USD 2M Butterfly 10-delta
+24935;FXOpt;EUR/USD 2M Risk Reversal 10-delta
+3770;FXOpt;EUR/USD 3M ATM
+24975;FXOpt;EUR/USD 3M Butterfly 25-delta
+24949;FXOpt;EUR/USD 3M Risk Reversal 25-delta
+24962;FXOpt;EUR/USD 3M Butterfly 10-delta
+24936;FXOpt;EUR/USD 3M Risk Reversal 10-delta
+27189;FXOpt;EUR/USD 4M ATM
+27199;FXOpt;EUR/USD 4M Butterfly 25-delta
+27194;FXOpt;EUR/USD 4M Risk Reversal 25-delta
+4474265;FXOpt;EUR/USD 4M Butterfly 10-delta
+4474267;FXOpt;EUR/USD 4M Risk Reversal 10-delta
+3771;FXOpt;EUR/USD 6M ATM
+24976;FXOpt;EUR/USD 6M Butterfly 25-delta
+24950;FXOpt;EUR/USD 6M Risk Reversal 25-delta
+24963;FXOpt;EUR/USD 6M Butterfly 10-delta
+24937;FXOpt;EUR/USD 6M Risk Reversal 10-delta
+3772;FXOpt;EUR/USD 9M ATM
+24977;FXOpt;EUR/USD 9M Butterfly 25-delta
+24951;FXOpt;EUR/USD 9M Risk Reversal 25-delta
+24964;FXOpt;EUR/USD 9M Butterfly 10-delta
+24938;FXOpt;EUR/USD 9M Risk Reversal 10-delta
+3773;FXOpt;EUR/USD 1Y ATM
+24978;FXOpt;EUR/USD 1Y Butterfly 25-delta
+24952;FXOpt;EUR/USD 1Y Risk Reversal 25-delta
+24965;FXOpt;EUR/USD 1Y Butterfly 10-delta
+24939;FXOpt;EUR/USD 1Y Risk Reversal 10-delta
+24924;FXOpt;EUR/USD 18M ATM
+24968;FXOpt;EUR/USD 18M Butterfly 25-delta
+24942;FXOpt;EUR/USD 18M Risk Reversal 25-delta
+24955;FXOpt;EUR/USD 18M Butterfly 10-delta
+24929;FXOpt;EUR/USD 18M Risk Reversal 10-delta
+3774;FXOpt;EUR/USD 2Y ATM
+24979;FXOpt;EUR/USD 2Y Butterfly 25-delta
+24953;FXOpt;EUR/USD 2Y Risk Reversal 25-delta
+24966;FXOpt;EUR/USD 2Y Butterfly 10-delta
+24940;FXOpt;EUR/USD 2Y Risk Reversal 10-delta

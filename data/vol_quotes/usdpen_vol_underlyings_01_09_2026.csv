@@ -1,0 +1,51 @@
+Id;Type;Description
+35316;FXOpt;USD/PEN 1W ATM
+35320;FXOpt;USD/PEN 1W Butterfly 25-delta
+35318;FXOpt;USD/PEN 1W Risk Reversal 25-delta
+35319;FXOpt;USD/PEN 1W Butterfly 10-delta
+35317;FXOpt;USD/PEN 1W Risk Reversal 10-delta
+35321;FXOpt;USD/PEN 2W ATM
+35325;FXOpt;USD/PEN 2W Butterfly 25-delta
+35323;FXOpt;USD/PEN 2W Risk Reversal 25-delta
+35324;FXOpt;USD/PEN 2W Butterfly 10-delta
+35322;FXOpt;USD/PEN 2W Risk Reversal 10-delta
+35326;FXOpt;USD/PEN 3W ATM
+35330;FXOpt;USD/PEN 3W Butterfly 25-delta
+35328;FXOpt;USD/PEN 3W Risk Reversal 25-delta
+35329;FXOpt;USD/PEN 3W Butterfly 10-delta
+35327;FXOpt;USD/PEN 3W Risk Reversal 10-delta
+35331;FXOpt;USD/PEN 1M ATM
+35335;FXOpt;USD/PEN 1M Butterfly 25-delta
+35333;FXOpt;USD/PEN 1M Risk Reversal 25-delta
+35334;FXOpt;USD/PEN 1M Butterfly 10-delta
+35332;FXOpt;USD/PEN 1M Risk Reversal 10-delta
+35336;FXOpt;USD/PEN 2M ATM
+35340;FXOpt;USD/PEN 2M Butterfly 25-delta
+35338;FXOpt;USD/PEN 2M Risk Reversal 25-delta
+35339;FXOpt;USD/PEN 2M Butterfly 10-delta
+35337;FXOpt;USD/PEN 2M Risk Reversal 10-delta
+35341;FXOpt;USD/PEN 3M ATM
+35345;FXOpt;USD/PEN 3M Butterfly 25-delta
+35343;FXOpt;USD/PEN 3M Risk Reversal 25-delta
+35344;FXOpt;USD/PEN 3M Butterfly 10-delta
+35342;FXOpt;USD/PEN 3M Risk Reversal 10-delta
+35351;FXOpt;USD/PEN 6M ATM
+35355;FXOpt;USD/PEN 6M Butterfly 25-delta
+35353;FXOpt;USD/PEN 6M Risk Reversal 25-delta
+35354;FXOpt;USD/PEN 6M Butterfly 10-delta
+35352;FXOpt;USD/PEN 6M Risk Reversal 10-delta
+35356;FXOpt;USD/PEN 9M ATM
+35360;FXOpt;USD/PEN 9M Butterfly 25-delta
+35358;FXOpt;USD/PEN 9M Risk Reversal 25-delta
+35359;FXOpt;USD/PEN 9M Butterfly 10-delta
+35357;FXOpt;USD/PEN 9M Risk Reversal 10-delta
+35361;FXOpt;USD/PEN 1Y ATM
+35365;FXOpt;USD/PEN 1Y Butterfly 25-delta
+35363;FXOpt;USD/PEN 1Y Risk Reversal 25-delta
+35364;FXOpt;USD/PEN 1Y Butterfly 10-delta
+35362;FXOpt;USD/PEN 1Y Risk Reversal 10-delta
+35371;FXOpt;USD/PEN 2Y ATM
+35375;FXOpt;USD/PEN 2Y Butterfly 25-delta
+35373;FXOpt;USD/PEN 2Y Risk Reversal 25-delta
+35374;FXOpt;USD/PEN 2Y Butterfly 10-delta
+35372;FXOpt;USD/PEN 2Y Risk Reversal 10-delta

@@ -1,0 +1,23 @@
+# Bytecode de Python. Se regenera en cada ejecución y cambia de contenido aunque
+# el fuente no cambie: versionarlo llena el historial de ruido.
+__pycache__/
+*.pyc
+*.pyo
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Descargas de la interfaz de Claude. Son copias de archivos que ya viven en su
+# sitio dentro del repo (vol_surface_builder/examples/run_all.py,
+# curve_bootstrapper/server.py). Tener dos copias del mismo archivo en el
+# repositorio es una fuente segura de confusión.
+Claude outputs/
+
+# Salidas generadas por los scripts de ejemplo: se reconstruyen corriendo
+# `python vol_surface_builder/examples/run_all.py`.
+vol_surface_builder/examples/output/
+
+# Worktrees locales de Claude Code
+.claude/worktrees/

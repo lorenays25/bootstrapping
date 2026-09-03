@@ -1,0 +1,25 @@
+Parameter;Value
+S U R F A C E C O N F I G;
+Granularity;Continuous
+Spread Method;
+;
+Q U O T E C O N V E N T I O N S;
+DateCut of Expiries;Lima 17:00
+Volatility Day Count;ACT/365
+Quotes are Delta with Premium;true
+Spot Delta Last Tenor;0D
+ATM Zero Straddle Last Tenor;0D
+Strangle/Fly Quotes;2vol (CP Avg)
+;
+I N T E R P O L A T I O N C O N F I G;
+Interpolate Outright Variance;true
+Down Extrap 1.0 Delta;1.0
+Up Extrap 1.0 Delta;1.0
+Interpolate on Trading Time;false
+Weighting;true
+;
+R O L L I N G C O N F I G;
+Roll Method;Forward Volatility
+;
+I N F O;
+FXDate;02/09/2026
