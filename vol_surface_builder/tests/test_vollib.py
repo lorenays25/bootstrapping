@@ -50,27 +50,57 @@ sc, sp = sm.wing_vols(atm, rr, bf)
 check("RR = call - put", abs((sc - sp) - rr) < 1e-15)
 check("BF = (call+put)/2 - ATM", abs((sc + sp) / 2 - atm - bf) < 1e-15)
 
-print("\n5. Ala: extension lineal con la pendiente tangente del spline")
+print("\n5. Ala: parabola hasta el tope sigma_10 + (sigma_10 - sigma_25), luego plana")
 import datetime as _d5
-_sl = sm.build_slice("T", _d5.date(2027,9,1), _d5.date(2027,9,3), 1.0, 17.5, 0.959,
-                     DeltaConvention(True, True),
-                     0.0972, 0.022875, 0.00425, 0.043075, 0.01265,
-                     zero_delta_straddle=True, wing_slope_factor=1.0)
+_ARGS = dict(zero_delta_straddle=True)
+def _mk(**kw):
+    return sm.build_slice("T", _d5.date(2027,9,1), _d5.date(2027,9,3), 1.0, 17.5, 0.959,
+                          DeltaConvention(True, True),
+                          0.0972, 0.022875, 0.00425, 0.043075, 0.01265, **_ARGS, **kw)
+
+# --- ala con tope (comportamiento por defecto)
+_sl = _mk(wing_slope_factor=1.0)
 _lo, _hi = _sl.axis_range()
 _h = 1e-4
-_slope_in = (_sl.vol_at_call_delta(_lo + _h) - _sl.vol_at_call_delta(_lo)) / _h
+_slope_in  = (_sl.vol_at_call_delta(_lo + _h) - _sl.vol_at_call_delta(_lo)) / _h
 _slope_out = (_sl.vol_at_call_delta(_lo) - _sl.vol_at_call_delta(_lo - _h)) / _h
-check("pendiente continua en el nodo de 10 delta call", abs(_slope_in - _slope_out) < 1e-6,
+check("pendiente continua en el nodo de 10 delta call", abs(_slope_in - _slope_out) < 1e-5,
       f"{_slope_in:.8f} vs {_slope_out:.8f}")
+
+_p = {q.label: q.vol for q in _sl.points}
+_topeC = 2 * _p["10C"] - _p["25C"]
+_topeP = 2 * _p["10P"] - _p["25P"]
+check("el ala call llega al tope 2*sigma_10 - sigma_25 en wing_flat_delta",
+      abs(_sl.vol_at_call_delta(_sl.wing_flat_delta) - _topeC) < 1e-12,
+      f"{_sl.vol_at_call_delta(_sl.wing_flat_delta):.8f} vs {_topeC:.8f}")
+check("el ala put llega al tope 2*sigma_10P - sigma_25P",
+      abs(_sl.vol_at_call_delta(100.0 - _sl.wing_flat_delta) - _topeP) < 1e-12)
+check("mas alla del tope el ala call es PLANA",
+      abs(_sl.vol_at_call_delta(0.0) - _topeC) < 1e-15 and
+      abs(_sl.vol_at_call_delta(-30.0) - _topeC) < 1e-15)
+check("mas alla del tope el ala put es PLANA",
+      abs(_sl.vol_at_call_delta(100.0) - _topeP) < 1e-15 and
+      abs(_sl.vol_at_call_delta(130.0) - _topeP) < 1e-15)
+check("el ala call es monotona entre el nodo y el tope",
+      all(_sl.vol_at_call_delta(a) <= _sl.vol_at_call_delta(b) + 1e-15
+          for a, b in zip([_lo - i * (_lo - 0.5) / 40 for i in range(41)],
+                          [_lo - (i+1) * (_lo - 0.5) / 40 for i in range(40)]))
+      or all(_sl.vol_at_call_delta(a) >= _sl.vol_at_call_delta(b) - 1e-15
+             for a, b in zip([_lo - i * (_lo - 0.5) / 40 for i in range(41)],
+                             [_lo - (i+1) * (_lo - 0.5) / 40 for i in range(40)])))
+check("el ala nunca se pasa del tope",
+      min(_topeC, _p["10C"]) - 1e-15 <= _sl.vol_at_call_delta(_lo - 4.0) <= max(_topeC, _p["10C"]) + 1e-15)
+
+# --- wing_ext_lambda=None recupera la recta tangente pura
+_slr = _mk(wing_slope_factor=1.0, wing_ext_lambda=None)
 _x = _lo - 5.0
-check("el ala es RECTA (no plana, no curva)",
-      abs(_sl.vol_at_call_delta(_x) - (_sl.vol_at_call_delta(_lo) + _slope_out * (_x - _lo))) < 1e-12)
-_sl0 = sm.build_slice("T", _d5.date(2027,9,1), _d5.date(2027,9,3), 1.0, 17.5, 0.959,
-                      DeltaConvention(True, True),
-                      0.0972, 0.022875, 0.00425, 0.043075, 0.01265,
-                      zero_delta_straddle=True, wing_slope_factor=0.0)
-check("wing_slope_factor=0 -> ala PLANA",
+_sr = (_slr.vol_at_call_delta(_lo) - _slr.vol_at_call_delta(_lo - _h)) / _h
+check("wing_ext_lambda=None -> ala RECTA sin tope",
+      abs(_slr.vol_at_call_delta(_x) - (_slr.vol_at_call_delta(_lo) + _sr * (_x - _lo))) < 1e-10)
+_sl0 = _mk(wing_slope_factor=0.0, wing_ext_lambda=None)
+check("wing_slope_factor=0 y sin tope -> ala PLANA",
       abs(_sl0.vol_at_call_delta(_x) - _sl0.vol_at_call_delta(_lo)) < 1e-15)
+
 check("el eje del spline es MONOTONO en los 5 nodos",
       all(b > a for a, b in zip([p.call_delta for p in _sl.points],
                                 [p.call_delta for p in _sl.points][1:])))

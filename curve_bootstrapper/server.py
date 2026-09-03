@@ -83,6 +83,32 @@ def _vol_val_date(cfg):
     return _dt.date.fromisoformat(str(v)[:10]) if not isinstance(v, _dt.date) else v
 
 
+# ---------------------------------------------------------------------------
+# MÓDULO 3 — impactos: valorización y griegas (impactlib)
+#
+# Mismo import tolerante a fallo que el Módulo 2: si no está, las otras dos
+# pestañas siguen funcionando y el error se reporta en /imp/config.
+# ---------------------------------------------------------------------------
+IMP_ROOT = os.path.abspath(os.path.join(HERE, "..", "impact_engine"))
+_IMP_ERR = None
+try:
+    sys.path.insert(0, os.path.join(IMP_ROOT, "src"))
+    from impactlib import portfolio as impport
+    from impactlib import report as impreport
+    from impactlib import escenarios as impesc
+    from impactlib import products as impprod
+    from impactlib import core as impcore
+except Exception as _e:                                    # pragma: no cover
+    impport = impreport = impesc = impprod = impcore = None
+    _IMP_ERR = f"{type(_e).__name__}: {_e}"
+
+
+def _imp_unavailable():
+    return {"ok": False, "error":
+            f"El Módulo 3 no está disponible: {_IMP_ERR}. "
+            f"Se esperaba encontrarlo en {IMP_ROOT}."}
+
+
 def _vol_unavailable():
     return {"ok": False, "error":
             f"El Módulo 2 no está disponible: {_VOL_ERR}. "
@@ -1009,10 +1035,191 @@ def vol_export_csv(payload: dict = Body(...)):
                                       f'attachment; filename="{pair}_surface.csv"'})
 
 
+# ---------------------------------------------------------------------------
+# MÓDULO 3 — endpoints
+# ---------------------------------------------------------------------------
+#: Spot de referencia por par, calibrado contra el propio reporte de Calypso.
+#: Se puede sobreescribir desde la interfaz, igual que en el Módulo 2, porque el
+#: export de tipos de cambio viene redondeado a dos decimales y eso se propaga.
+IMP_SPOTS_DEFAULT = {"USD/PEN": 3.36564, "USD/MXN": 17.0033, "USD/BRL": 5.14525,
+                     "USD/CLP": 936.60, "USD/COP": 3167.45}
+#: Spot para la superficie. No es el mismo número que el de arriba: aquel sale
+#: del nivel de la prima y este del mapeo strike -> delta. La diferencia entre
+#: ambos es del orden de la base cross-currency.
+IMP_SPOTS_VOL = {"USDPEN": 3.365, "USDMXN": 16.993, "USDBRL": 5.1550,
+                 "USDCLP": 937.0, "USDCOP": 3167.0}
+
+
+@app.get("/imp/config")
+def imp_config():
+    """Qué sabe hacer el Módulo 3 y con qué insumos cuenta hoy."""
+    if impreport is None:
+        return _imp_unavailable()
+    return {
+        "ok": True,
+        "spots": IMP_SPOTS_DEFAULT,
+        "campos": list(impreport.CAMPOS),
+        "en_base": list(impreport.EN_BASE),
+        "hoy": _dt.date.today().isoformat(),
+        "productos": [{"clave": p.clave, "etiqueta": p.etiqueta,
+                       "espera": p.espera, "griegas": list(p.griegas),
+                       "columnas": p.columnas_visibles()}
+                      for p in impprod.REGISTRO],
+        "escenarios": [{"clave": k, "titulo": impesc.DESCRIPCION[k][0],
+                        "detalle": impesc.DESCRIPCION[k][1]} for k in impesc.CLAVES],
+        "modulo1": volorch is not None,
+        "modulo2": volorch is not None,
+    }
+
+
+@app.post("/imp/price")
+def imp_price(payload: dict = Body(...)):
+    """Valoriza un portafolio de Calypso y compara operación por operación.
+
+    payload = {csv, valuation_date, escenario, spots:{}, spots_vol:{}}
+    """
+    if impreport is None:
+        return _imp_unavailable()
+    text = payload.get("csv") or ""
+    if not text.strip():
+        return {"ok": False, "error": "No llegó ningún portafolio."}
+
+    import tempfile
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False,
+                                         encoding="utf-8-sig") as fh:
+            fh.write(text)
+            tmp = fh.name
+        clave_prod = payload.get("producto") or impprod.REGISTRO[0].clave
+        rows, diag = impport.load(tmp, producto=clave_prod)
+    except Exception as e:
+        return {"ok": False, "error": f"No pude leer el portafolio: {e}"}
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
+    if not rows:
+        p = impprod.POR_CLAVE.get(clave_prod)
+        msg = (f"Ninguna fila del archivo es un producto de tipo "
+               f"«{p.etiqueta if p else clave_prod}». ")
+        return {"ok": False, "error": msg + " ".join(diag["mensajes"]),
+                "diagnostico": diag}
+
+    vd = payload.get("valuation_date")
+    val = _dt.date.fromisoformat(str(vd)[:10]) if vd else _dt.date.today()
+    spot_date = impcore.spot_date(val)
+
+    spots = dict(IMP_SPOTS_DEFAULT)
+    for k, v in (payload.get("spots") or {}).items():
+        try:
+            spots[k] = float(v)
+        except (TypeError, ValueError):
+            pass
+    # El mismo tipo de cambio que el usuario escribe alimenta a la superficie,
+    # con la clave sin barra que usa el Módulo 2.
+    spots_vol = dict(IMP_SPOTS_VOL)
+    for k, v in spots.items():
+        spots_vol[k.replace("/", "")] = v
+
+    clave = payload.get("escenario") or "calypso"
+    if clave not in impesc.CLAVES:
+        clave = "calypso"
+    try:
+        feed, avisos = impesc.armar(clave, rows, val, spot_date, spots,
+                                    spots_vol=spots_vol)
+        filas = impreport.run(rows, feed)
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    avisos = list(avisos) + list(feed.avisos())
+
+    pares = sorted({f["pair"] for f in filas})
+    faltan = sorted({r.opt.pair for r in rows} - set(pares))
+    if faltan:
+        avisos.append(f"Sin tipo de cambio de referencia para {', '.join(faltan)}: "
+                      f"esas operaciones quedaron fuera.")
+    # La fecha por defecto es el día de ejecución; un export de otro día se
+    # delata porque trae vencimientos ya pasados.
+    vencidas = sum(1 for r in rows if r.opt.expiry < val)
+    if vencidas:
+        prox = min(r.opt.expiry for r in rows)
+        avisos.insert(0, f"{vencidas} de {len(rows)} operaciones ya vencieron al "
+                         f"{val.isoformat()} (el vencimiento más antiguo del archivo "
+                         f"es {prox.isoformat()}). Si el reporte es de otra fecha, "
+                         f"cámbiala arriba: todo se rehace con ella.")
+    avisos.extend(diag["mensajes"])
+    from collections import Counter
+    p = impprod.POR_CLAVE.get(clave_prod)
+    return {"ok": True, "valuation_date": val.isoformat(),
+            "spot_date": spot_date.isoformat(),
+            "producto": clave_prod,
+            "producto_etiqueta": p.etiqueta if p else clave_prod,
+            "n_archivo": diag["total"],
+            "n_portafolio": len(rows), "n_valorizadas": len(filas),
+            "diagnostico": {k: v for k, v in diag.items() if k != "cabeceras"},
+            "pares": pares,
+            "escenario": clave, "escenario_titulo": impesc.DESCRIPCION[clave][0],
+            "feed": feed.nombre, "avisos": avisos, "spots": spots,
+            "productos": dict(Counter(f["producto"] for f in filas)),
+            "resumen": impreport.resumen(filas), "filas": filas}
+
+
+@app.post("/imp/export-csv", response_class=PlainTextResponse)
+def imp_export_csv(payload: dict = Body(...)):
+    """El detalle por operación, tal cual se ve en pantalla."""
+    filas = payload.get("filas") or []
+    if not filas:
+        return PlainTextResponse("", status_code=400)
+    import csv as _csv
+    buf = io.StringIO()
+    w = _csv.DictWriter(buf, fieldnames=list(filas[0]), delimiter=";")
+    w.writeheader()
+    w.writerows(filas)
+    return PlainTextResponse(buf.getvalue(), headers={
+        "Content-Disposition": 'attachment; filename="impactos_detalle.csv"'})
+
+
+def _puerto_libre(host: str, desde: int, intentos: int = 12):
+    """Primer puerto libre a partir de `desde`.
+
+    En Windows, arrancar el servidor sin cerrar el anterior deja el puerto
+    tomado y uvicorn muere con [Errno 10048] "solo se permite un uso de cada
+    dirección de socket". El mensaje no dice que ya hay una instancia corriendo,
+    y lo que confunde de verdad es que el navegador SIGUE funcionando: lo está
+    atendiendo el proceso viejo, sin los cambios nuevos. Así que en vez de
+    fallar, se busca el siguiente puerto y se avisa.
+    """
+    import socket
+    for p in range(desde, desde + intentos):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, p))
+                return p, p != desde
+            except OSError:
+                continue
+    return None, True
+
+
 if __name__ == "__main__":
     import uvicorn
-    print("=" * 60)
-    print("  curvelib + vollib — curvas y superficies de volatilidad")
-    print("  Abre:  http://127.0.0.1:8000")
-    print("=" * 60)
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
+    HOST, BASE = "127.0.0.1", 8000
+    puerto, ocupado = _puerto_libre(HOST, BASE)
+    print("=" * 66)
+    print("  curvelib + vollib + impactlib — factores de riesgo y valorización")
+    if puerto is None:
+        print(f"  Los puertos {BASE} a {BASE + 11} están todos ocupados.")
+        print("  Hay instancias viejas del servidor corriendo. Ciérralas con:")
+        print("      Windows :  taskkill /F /IM python.exe")
+        print("      Linux   :  pkill -f server.py")
+        print("=" * 66)
+        raise SystemExit(1)
+    if ocupado:
+        print(f"  ! El puerto {BASE} ya estaba ocupado por otra instancia del")
+        print(f"    servidor. Esta arranca en el {puerto}.")
+        print(f"    OJO: la pestaña que tengas abierta en :{BASE} la sigue")
+        print("    atendiendo el proceso viejo y NO tiene los cambios nuevos.")
+        print("    Para dejar solo esta:  taskkill /F /IM python.exe  y vuelve a arrancar.")
+    print(f"  Abre:  http://{HOST}:{puerto}")
+    print("=" * 66)
+    uvicorn.run(app, host=HOST, port=puerto, log_level="warning")

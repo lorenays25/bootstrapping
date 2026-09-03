@@ -68,19 +68,6 @@
   .curve-item .deps{margin-left:auto;font-size:9.5px;color:var(--muted)}
   .curve-item .grp{font-size:8.5px;color:var(--amber);border:1px solid var(--amber);
     border-radius:3px;padding:0 4px;margin-left:6px;letter-spacing:.03em}
-  /* Sub-pestañas de producto. Cada producto tiene su propio export de Calypso,
-     su propio lector y su propia carga: separarlos visualmente es lo que evita
-     que alguien cargue el archivo de forwards en la pestaña de opciones y lea
-     un resultado que no le corresponde. */
-    margin:-4px 0 18px;padding-bottom:0}
-  .prodtab{background:transparent;border:1px solid var(--line);border-bottom:none;
-    border-radius:5px 5px 0 0;color:var(--muted);font-size:12px;letter-spacing:.03em;
-    padding:8px 16px;cursor:pointer;position:relative;top:1px}
-  .prodtab:hover{color:var(--fg)}
-  .prodtab.active{color:var(--amber);border-color:var(--amber);
-    background:var(--panel);border-bottom:1px solid var(--panel)}
-  .prodtab .cnt{font-size:10px;color:var(--muted);margin-left:6px}
-  .prodtab.active .cnt{color:var(--amber)}
   .hint{font-size:11.5px;color:var(--amber);background:rgba(255,180,60,.08);
     border:1px solid var(--amber);border-radius:4px;padding:6px 10px}
   /* Las notas explicativas viven detrás del foquito del encabezado. Ocupan
@@ -256,7 +243,6 @@
   <button class="primary only-vol" id="btn-vol-build" style="display:none">▶ Construir superficies</button>
   <button class="ghost only-imp" id="btn-imp-load" style="display:none">Cargar portafolio (CSV)</button>
   <button class="primary only-imp" id="btn-imp-run" style="display:none">▶ Valorizar</button>
-  <span class="only-imp" id="imp-cargado" style="display:none;font-size:11px;color:var(--muted)"></span>
   <input type="file" id="imp-input" accept=".csv,.txt" hidden>
   <input type="file" id="file-input" accept=".yaml,.yml" hidden>
   <input type="file" id="quotes-input" accept=".csv,.txt" hidden>
@@ -319,10 +305,7 @@
       <div id="imp-spots"></div>
     </div>
   </nav>
-  <main>
-    <div id="imp-prodtabs" class="prodtabs"></div>
-    <div id="imp-editor"></div>
-  </main>
+  <main id="imp-editor"></main>
 </div>
 
 <dialog id="dlg">
@@ -2924,11 +2907,11 @@ $("#vq-file-input").onchange = e=>{
 // MÓDULO 3 — Impactos: valorización y griegas contra el reporte de Calypso
 // ===========================================================================
 let impCfg = null;        // respuesta de /imp/config
-let impProd = null;       // clave del producto activo
-// Un estado POR PRODUCTO. Cada uno tiene su propio export de Calypso, así que
-// cargar el de forwards no puede pisar el de opciones ni sus resultados.
-let impEstado = {};       // clave -> {csv, nombre, res, filtro}
-let impSpots = {};        // ediciones de tipo de cambio, comunes a todos
+let impCsv = "";          // portafolio cargado (texto del CSV)
+let impNombre = "";       // nombre del archivo, para mostrarlo
+let impRes = null;        // última respuesta de /imp/price
+let impSpots = {};        // ediciones de tipo de cambio
+let impFiltro = "";       // filtro de par en la tabla de detalle
 
 const IMP_CAMPOS = [
   {k:"pv",    lbl:"PV",    dec:2},
@@ -2939,8 +2922,6 @@ const IMP_CAMPOS = [
   {k:"rho",   lbl:"Rho",   dec:4},
   {k:"rho2",  lbl:"Rho2",  dec:4},
 ];
-
-function E(){ return impEstado[impProd] || (impEstado[impProd] = {csv:"",nombre:"",res:null,filtro:""}); }
 
 function impNum(v, d){
   if(v===null || v===undefined || !isFinite(v)) return "—";
@@ -2974,42 +2955,10 @@ async function initImp(){
       style="color:var(--red)">${impCfg.error}</div></div>`;
     return;
   }
-  impProd = (impCfg.productos && impCfg.productos[0] || {}).clave || null;
-  (impCfg.productos||[]).forEach(p=> impEstado[p.clave] = {csv:"",nombre:"",res:null,filtro:""});
-  renderImpProdTabs();
   renderImpEscenarios();
   renderImpProductos();
   renderImpSpots();
-  renderImpVista();
-}
-
-function renderImpProdTabs(){
-  const box = $("#imp-prodtabs"); if(!box || !impCfg) return;
-  box.innerHTML = (impCfg.productos||[]).map(p=>{
-    const st = impEstado[p.clave] || {};
-    const cnt = st.res ? `<span class="cnt">${st.res.n_valorizadas}</span>`
-              : (st.csv ? `<span class="cnt">sin valorizar</span>` : "");
-    return `<button class="prodtab${p.clave===impProd?" active":""}"
-      data-prod="${p.clave}" title="${p.espera||""}">${p.etiqueta}${cnt}</button>`;
-  }).join("");
-  box.querySelectorAll(".prodtab").forEach(b=>{
-    b.onclick = ()=>{ impProd = b.dataset.prod; renderImpProdTabs(); renderImpVista(); };
-  });
-  const p = (impCfg.productos||[]).find(x=>x.clave===impProd);
-  if(p){
-    $("#btn-imp-load").textContent = `Cargar ${p.etiqueta.toLowerCase()} (CSV)`;
-    $("#btn-imp-load").title = p.espera || "";
-  }
-  const st = E();
-  const chip = $("#imp-cargado");
-  chip.textContent = st.nombre ? st.nombre : "";
-  chip.style.display = st.nombre ? "" : "none";
-}
-
-/** Qué se ve en el panel principal del producto activo. */
-function renderImpVista(){
-  const st = E();
-  if(st.res) renderImp(); else renderImpEmpty();
+  renderImpEmpty();
 }
 
 function renderImpEscenarios(){
@@ -3021,26 +2970,21 @@ function renderImpEscenarios(){
       <div style="color:var(--muted);font-size:11px;margin-left:20px">${e.detalle}</div>
     </label>`).join("");
   box.querySelectorAll('input[name="imp-esc"]').forEach(el=>{
-    el.onchange = ()=>{ if(E().res) runImp(); };
+    el.onchange = ()=>{ if(impRes) runImp(); };
   });
 }
 
 function renderImpProductos(){
   const box = $("#imp-productos"); if(!box || !impCfg) return;
   box.innerHTML = (impCfg.productos||[]).map(p=>`
-    <div style="margin:8px 0;font-size:11.5px;padding-left:8px;
-      border-left:2px solid ${p.clave===impProd?"var(--amber)":"var(--line)"}">
-      <span style="color:${p.clave===impProd?"var(--amber)":"var(--fg)"}">${p.etiqueta}</span>
+    <div style="margin:5px 0;font-size:11.5px">
+      ${p.etiqueta}
       <div style="color:var(--muted);font-size:10.5px">
         ${p.griegas.filter(g=>g!=="pv").join(" · ")}</div>
-      <div style="color:var(--muted);font-size:10.5px;margin-top:3px">
-        columnas: ${(p.columnas||[]).slice(0,5).join(", ")}${(p.columnas||[]).length>5?"…":""}</div>
     </div>`).join("") + `
     <p style="color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px">
-      Un archivo, un producto. El reporte de opciones y el de forwards no
-      comparten columnas —un forward no tiene strike ni volatilidad implícita,
-      tiene tasa pactada— así que cada uno tiene su lector y su carga. Un
-      forward tampoco reporta gamma ni vega: son cero por construcción, no
+      Cada fila del portafolio se despacha al producto que la reconoce. Un
+      forward no reporta gamma ni vega porque son cero por construcción, no
       porque no se hayan calculado.</p>`;
 }
 
@@ -3064,36 +3008,27 @@ function renderImpSpots(){
 }
 
 function renderImpEmpty(){
-  const p = (impCfg.productos||[]).find(x=>x.clave===impProd) || {};
-  const st = E();
   $("#imp-editor").innerHTML = `
     <div class="card">
-      <h3>${p.etiqueta || "Producto"} — sin portafolio cargado</h3>
+      <h3>Sin portafolio cargado</h3>
       <p style="color:var(--muted);font-size:12.5px;line-height:1.7;margin:0 0 10px">
-        ${st.csv ? `<b style="color:var(--amber)">${st.nombre}</b> está cargado.
-          Pulsa <b>Valorizar</b>.`
-        : `Pulsa <b>Cargar ${(p.etiqueta||"portafolio").toLowerCase()} (CSV)</b>
-           arriba a la derecha y luego <b>Valorizar</b>.`}
-        Enciende el foquito 💡 del encabezado para ver las notas.</p>
+        Pulsa <b>Cargar portafolio (CSV)</b> arriba a la derecha y luego
+        <b>Valorizar</b>. Enciende el foquito 💡 del encabezado para ver las notas.</p>
       <div class="hint" style="line-height:1.7">
-        ${p.espera || ""}
+        Usa <b>Cargar portafolio (CSV)</b> arriba a la derecha con el export de
+        valorización de Calypso. Se leen las columnas que definen la operación
+        —<code>Ccy Pair</code>, <code>Put/Call</code>, <code>Quantity</code>,
+        <code>Strike</code>, <code>Expiry Date</code>, <code>Delivery Date</code>—
+        y las que Calypso reporta como resultado, para poder compararlas.
         <br><br>
-        Columnas que busca: ${(p.columnas||[]).map(c=>`<code>${c}</code>`).join(", ")}.
-        Cada una acepta varios nombres alternativos; si tu export las llama de otra
-        forma, el motor dice cuál no encontró en vez de descartar las filas en
-        silencio.
-        <br><br>
-        Un archivo por producto. Si cargas aquí el export de otro, el motor lo
-        detecta, te dice cuántas filas son de qué producto y no las mezcla.
-        <br><br>
-        Nada queda pegado: sin archivo, esta pestaña no muestra números.
+        Nada queda pegado: si no cargas un archivo, esta pestaña no muestra números.
       </div>
     </div>`;
 }
 
 function impPayload(){
   const esc = document.querySelector('input[name="imp-esc"]:checked');
-  return {csv: E().csv, producto: impProd,
+  return {csv: impCsv,
           valuation_date: $("#imp-valdate").value || undefined,
           escenario: esc ? esc.value : "calypso",
           spots: impSpots,
@@ -3101,7 +3036,7 @@ function impPayload(){
 }
 
 async function runImp(){
-  if(!E().csv){ setStatus("Carga primero el portafolio de este producto","err"); return; }
+  if(!impCsv){ setStatus("Carga primero el portafolio","err"); return; }
   $("#imp-editor").innerHTML = `<div class="card"><div class="hint">Valorizando…</div></div>`;
   setStatus("Valorizando el portafolio…");
   try{
@@ -3109,17 +3044,13 @@ async function runImp(){
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify(impPayload())})).json();
     if(!d.ok){
-      E().res = null;
-      $("#imp-editor").innerHTML = `<div class="card">
-        <h3>No se pudo valorizar</h3>
-        <div class="hint hint-error" style="color:var(--red);border-color:var(--red);
-          background:rgba(224,108,108,.08);line-height:1.7">${d.error}</div></div>`;
-      renderImpProdTabs();
+      impRes = null;
+      $("#imp-editor").innerHTML = `<div class="card"><div class="hint hint-error"
+        style="color:var(--red)">${d.error}</div></div>`;
       setStatus("No se pudo valorizar","err");
       return;
     }
-    E().res = d; E().filtro = "";
-    renderImpProdTabs();
+    impRes = d; impFiltro = "";
     renderImp();
     setStatus(`${d.n_valorizadas} de ${d.n_portafolio} operaciones valorizadas`,"ok");
   }catch(e){
@@ -3130,17 +3061,17 @@ async function runImp(){
 }
 
 function renderImp(){
-  const d = E().res;
-  if(!d) return;
+  if(!impRes) return;
+  const d = impRes;
   const prods = Object.entries(d.productos||{})
     .map(([k,v])=>`${v} ${k.toLowerCase()}`).join(", ");
 
   let head = `<div class="card">
     <h3>Resumen</h3>
     <p style="color:var(--muted);font-size:12.5px;line-height:1.7;margin:0 0 10px">
-      <b style="color:var(--amber)">${E().nombre || "portafolio"}</b> ·
+      <b style="color:var(--amber)">${impNombre || "portafolio"}</b> ·
       valorización ${d.valuation_date} · fecha spot ${d.spot_date} ·
-      <b>${d.n_valorizadas}</b> de ${d.n_archivo || d.n_portafolio} filas del archivo${prods?` (${prods})`:""}
+      <b>${d.n_valorizadas}</b> de ${d.n_portafolio} operaciones${prods?` (${prods})`:""}
       <br>Escenario: <b>${d.escenario_titulo}</b> · factores: ${d.feed}</p>
     <div class="hint" style="line-height:1.7;margin-bottom:10px">
       Las tres comparaciones son la misma valorización con factores distintos.
@@ -3152,11 +3083,9 @@ function renderImp(){
         color:var(--amber);border-color:var(--amber);background:rgba(255,180,60,.08)">
         ${d.avisos.map(a=>`• ${a}`).join("<br>")}</div>` : ""}`;
 
-  const pinfo0 = (impCfg.productos||[]).find(x=>x.clave===impProd) || {griegas:[]};
-  const campos0 = IMP_CAMPOS.filter(c=> (pinfo0.griegas||[]).includes(c.k));
   head += `<table class="stick" style="font-size:11.5px"><thead><tr><th>Par</th>` +
-    campos0.map(c=>`<th class="num">${c.lbl}</th>`).join("") + `</tr></thead><tbody>` +
-    d.resumen.map(s=>`<tr><td>${s.pair}</td>` + campos0.map(c=>{
+    IMP_CAMPOS.map(c=>`<th class="num">${c.lbl}</th>`).join("") + `</tr></thead><tbody>` +
+    d.resumen.map(s=>`<tr><td>${s.pair}</td>` + IMP_CAMPOS.map(c=>{
       const v = s[c.k];
       if(!v) return `<td class="num" style="color:var(--muted)">—</td>`;
       return `<td class="num" style="color:${impColor(v.mediana)}">${v.mediana.toFixed(3)}%
@@ -3175,7 +3104,7 @@ function renderImp(){
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <label style="font-size:12px">Par</label>
       <select id="imp-filtro">${pares.map(p=>
-        `<option value="${p}"${p===E().filtro?" selected":""}>${p||"todos"}</option>`).join("")}</select>
+        `<option value="${p}"${p===impFiltro?" selected":""}>${p||"todos"}</option>`).join("")}</select>
       <span class="spacer" style="flex:1"></span>
       <button class="ghost" id="btn-imp-csv">Descargar detalle (CSV)</button>
     </div>
@@ -3187,24 +3116,18 @@ function renderImp(){
 
   $("#imp-editor").innerHTML = head;
   renderImpTabla();
-  $("#imp-filtro").onchange = e=>{ E().filtro = e.target.value; renderImpTabla(); };
+  $("#imp-filtro").onchange = e=>{ impFiltro = e.target.value; renderImpTabla(); };
   $("#btn-imp-csv").onclick = descargarImpCsv;
 }
 
 function renderImpTabla(){
-  const st = E();
-  const filas = st.res.filas.filter(f=> !st.filtro || f.pair===st.filtro);
-  // Solo las griegas que este producto reporta: un forward no tiene gamma ni
-  // vega, y una columna vacia se lee como un cero calculado.
-  const pinfo = (impCfg.productos||[]).find(x=>x.clave===impProd) || {griegas:[]};
-  const campos = IMP_CAMPOS.filter(c=> (pinfo.griegas||[]).includes(c.k));
-  const conVol = (pinfo.griegas||[]).includes("vega");
+  const filas = impRes.filas.filter(f=> !impFiltro || f.pair===impFiltro);
   const cab = `<thead><tr>
     <th>Trade</th><th>Par</th><th>Tipo</th><th>Lado</th>
-    <th class="num">Cantidad</th><th class="num">${conVol?"Strike":"Tasa pactada"}</th>
-    <th>Vencimiento</th><th class="num">Días</th>` +
-    (conVol?`<th class="num">Vol propia</th><th class="num">Vol Calypso</th>`:"") +
-    campos.map(c=>`<th class="num">${c.lbl}</th>`).join("") + `</tr></thead>`;
+    <th class="num">Cantidad</th><th class="num">Strike</th>
+    <th>Vencimiento</th><th class="num">Días</th>
+    <th class="num">Vol propia</th><th class="num">Vol Calypso</th>` +
+    IMP_CAMPOS.map(c=>`<th class="num">${c.lbl}</th>`).join("") + `</tr></thead>`;
   const cuerpo = filas.slice(0,4000).map(f=>{
     const dv = (f.vol_calypso===null||f.vol_propia===null) ? null : f.vol_propia-f.vol_calypso;
     return `<tr>
@@ -3213,11 +3136,11 @@ function renderImpTabla(){
       <td class="num">${impNum(f.cantidad,0)}</td>
       <td class="num" style="color:var(--amber)">${impNum(f.strike,5)}</td>
       <td>${f.expiry.split("-").reverse().join("/")}</td>
-      <td class="num">${f.dias}</td>` +
-      (conVol?`<td class="num">${impNum(f.vol_propia,4)}</td>
+      <td class="num">${f.dias}</td>
+      <td class="num">${impNum(f.vol_propia,4)}</td>
       <td class="num">${impNum(f.vol_calypso,4)}
-        ${dv===null?"":`<div style="font-size:10px;color:${impColor(dv*10)}">${dv>=0?"+":""}${dv.toFixed(4)}</div>`}</td>`:"") +
-      campos.map(c=>{
+        ${dv===null?"":`<div style="font-size:10px;color:${impColor(dv*10)}">${dv>=0?"+":""}${dv.toFixed(4)}</div>`}</td>` +
+      IMP_CAMPOS.map(c=>{
         const p = f[c.k+"_dif_pct"], cal = f[c.k+"_calypso"], dif = f[c.k+"_dif"];
         // Mismo umbral de materialidad que el resumen: sobre valores diminutos el
         // porcentaje no informa —una diferencia en el sexto decimal da miles por
@@ -3240,14 +3163,14 @@ function renderImpTabla(){
 }
 
 async function descargarImpCsv(){
-  const st = E(); if(!st.res) return;
-  const filas = st.res.filas.filter(f=> !st.filtro || f.pair===st.filtro);
+  if(!impRes) return;
+  const filas = impRes.filas.filter(f=> !impFiltro || f.pair===impFiltro);
   const r = await fetch("/imp/export-csv",{method:"POST",
     headers:{"Content-Type":"application/json"}, body: JSON.stringify({filas})});
   const txt = await r.text();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([txt],{type:"text/csv"}));
-  a.download = `impactos_${impProd.toLowerCase()}_detalle.csv`; a.click();
+  a.download = "impactos_detalle.csv"; a.click();
   URL.revokeObjectURL(a.href);
 }
 
@@ -3255,19 +3178,21 @@ $("#btn-imp-load").onclick = ()=> $("#imp-input").click();
 $("#imp-input").onchange = e=>{
   const f = e.target.files[0]; if(!f) return;
   const r = new FileReader();
-  const destino = impProd;               // el producto activo al elegir el archivo
   r.onload = ev=>{
-    const st = impEstado[destino];
-    st.csv = ev.target.result; st.nombre = f.name; st.res = null; st.filtro = "";
-    setStatus(`${f.name} cargado (${(st.csv.length/1024).toFixed(0)} KB)`,"ok");
-    renderImpProdTabs();
-    if(impProd === destino) renderImpVista();
+    impCsv = ev.target.result; impNombre = f.name;
+    setStatus(`Portafolio ${f.name} cargado (${(impCsv.length/1024).toFixed(0)} KB)`,"ok");
+    $("#imp-editor").innerHTML = `<div class="card"><h3>${f.name}</h3>
+      <div class="hint">Listo para valorizar. Elige el escenario en el panel de la
+      izquierda y pulsa <b>Valorizar</b>.</div></div>`;
   };
   r.readAsText(f);
   e.target.value = "";
 };
 $("#btn-imp-run").onclick = runImp;
-$("#imp-valdate").onchange = ()=>{ if(E().res) runImp(); };
+document.querySelectorAll('input[name="imp-esc"]').forEach(el=>{
+  el.onchange = ()=>{ if(impRes) runImp(); };
+});
+$("#imp-valdate").onchange = ()=>{ if(impRes) runImp(); };
 
 
 // ---------------------------------------------------------------------------

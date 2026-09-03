@@ -28,10 +28,33 @@ FLUJO
     en los nodos cotizados y empeora todo el interior (medido: 0.087 vs 0.023 vol
     pts de error máximo contra Calypso sobre 26 pilares).
 
- 5. Fuera del rango de los nodos de 10 delta, extensión LINEAL con la pendiente
-    tangente del spline en el nodo extremo, escalada por `wing_slope_factor`. La
-    extrapolación PLANA está descartada: da 0.82 vol pts de error en el punto de
-    5 delta call.
+ 5. ALA (fuera del rango de los nodos de 10 delta). Calypso APLANA el smile más
+    allá de un delta muy chico. Se comprueba en el portafolio: al 16/12/2026 los
+    strikes 21.1, 22.7, 22.8 y 22.9 de USD/MXN devuelven todos exactamente
+    12.66798. Ese valor tope es medible, y resulta ser
+
+        σ_tope = σ_10Δ + λ·(σ_10Δ − σ_25Δ),   con λ = 1
+
+    o sea: se repite una vez más el último tramo cotizado del smile. Medido sobre
+    17 (par, vencimiento) del portafolio de valorización: USD/PEN λ = 1.0009
+    (sd 0.0007, error ≤ 0.0009 vol pts, incluye un caso del lado put), USD/BRL
+    0.9815, USD/MXN 0.977–0.991 de dos meses en adelante.
+
+    Entre el nodo de 10 delta y el tope va una PARÁBOLA que empalma valor y
+    pendiente del spline en el nodo (la pendiente escalada por
+    `wing_slope_factor`) y llega a σ_tope en `wing_flat_delta`; de ahí hacia
+    afuera es constante. El valor se acota además al intervalo [σ_nodo, σ_tope]
+    para que el ala sea siempre monótona y no se pase del tope.
+
+    Contra el portafolio (207 operaciones fuera del rango de nodos, con el spot
+    del día a precisión completa): la recta tangente sin tope daba rms 0.137 y
+    máximo 0.303 vol pts; esta regla da rms 0.041 y máximo 0.195. En la grilla
+    de deltas de Calypso (dato independiente, 487 fechas) el punto de 5 delta no
+    se degrada: C5 pasa de −0.037 a +0.043 de mediana y P5 mejora de +0.070 a
+    +0.051.
+
+    `wing_ext_lambda = None` desactiva el tope y deja la recta tangente pura
+    (comportamiento anterior).
 
 UNIDADES: las hojas de Calypso vienen en PUNTOS DE VOL (4.72 = 4.72%). Adentro
 todo se maneja en DECIMAL (0.0472). La conversión ocurre solo en el loader.
@@ -80,9 +103,16 @@ class SmileSlice:
     quotes: Dict[str, float] = field(default_factory=dict)   # atm/rr25/bf25/rr10/bf10, decimal
     points: List[SmilePoint] = field(default_factory=list)
     wing_slope_factor: float = 1.0
+    #: Cuántos tramos [25Δ→10Δ] más se repiten para fijar el tope del ala.
+    #: `None` desactiva el tope (recta tangente pura, comportamiento anterior).
+    wing_ext_lambda: Optional[float] = 1.0
+    #: Delta (en %) a partir del cual el ala es plana.
+    wing_flat_delta: float = 0.5
     axis_conv: DeltaConvention = AXIS_CONVENTION
     _spline: CubicSpline = field(default=None, repr=False)
     _dspline: CubicSpline = field(default=None, repr=False)
+    _wingC: tuple = field(default=None, repr=False)
+    _wingP: tuple = field(default=None, repr=False)
 
     # ------------------------------------------------------------------ build
     def fit(self) -> "SmileSlice":
@@ -95,22 +125,60 @@ class SmileSlice:
             )
         self._spline = CubicSpline(xs, ys, bc_type="not-a-knot")
         self._dspline = self._spline.derivative()
+        self._fit_wings()
         return self
+
+    def _fit_wings(self) -> None:
+        """Precalcula la parábola y el tope de cada ala. Ver encabezado, paso 5."""
+        self._wingC = self._wingP = None
+        lam = self.wing_ext_lambda
+        if lam is None:
+            return
+        lo, hi = self.axis_range()
+        for side in ("C", "P"):
+            if side == "C":
+                x_node, x_flat = lo, self.wing_flat_delta
+                v_ext = (self.points[0].vol
+                         + lam * (self.points[0].vol - self.points[1].vol))
+                ok = x_flat < x_node
+            else:
+                x_node, x_flat = hi, 100.0 - self.wing_flat_delta
+                v_ext = (self.points[-1].vol
+                         + lam * (self.points[-1].vol - self.points[-2].vol))
+                ok = x_flat > x_node
+            if not ok:                       # geometría degenerada: queda la recta
+                continue
+            v_node = float(self._spline(x_node))
+            slope = self.wing_slope_factor * float(self._dspline(x_node))
+            d = x_flat - x_node
+            curv = (v_ext - v_node - slope * d) / (d * d)
+            packed = (x_node, x_flat, v_node, slope, curv,
+                      min(v_node, v_ext), max(v_node, v_ext), v_ext)
+            if side == "C":
+                self._wingC = packed
+            else:
+                self._wingP = packed
 
     # ------------------------------------------------------------------ eval
     def axis_range(self) -> tuple:
         return self.points[0].call_delta, self.points[-1].call_delta
 
     def vol_at_call_delta(self, x: float) -> float:
-        """Vol en una posición del eje. Fuera del rango de los nodos de 10 delta,
-        recta con la pendiente tangente del spline en el nodo extremo."""
+        """Vol en una posición del eje. Dentro del rango de los nodos de 10 delta
+        es el spline; fuera, el ala del paso 5 del encabezado."""
         lo, hi = self.axis_range()
+        if lo <= x <= hi:
+            return float(self._spline(x))
         k = self.wing_slope_factor
-        if x < lo:
-            return float(self._spline(lo)) + k * float(self._dspline(lo)) * (x - lo)
-        if x > hi:
-            return float(self._spline(hi)) + k * float(self._dspline(hi)) * (x - hi)
-        return float(self._spline(x))
+        w = self._wingC if x < lo else self._wingP
+        if w is None:                          # sin tope: recta tangente pura
+            a = lo if x < lo else hi
+            return float(self._spline(a)) + k * float(self._dspline(a)) * (x - a)
+        x_node, x_flat, v_node, slope, curv, v_min, v_max, v_ext = w
+        if (x <= x_flat) if x < lo else (x >= x_flat):
+            return v_ext
+        d = x - x_node
+        return min(max(v_node + slope * d + curv * d * d, v_min), v_max)
 
     def _x_of(self, K: float, sigma: float) -> float:
         return 100.0 * dl.call_delta(self.forward, K, sigma, self.tau,
@@ -205,6 +273,8 @@ def build_slice(tenor: str, expiry: _dt.date, delivery: _dt.date, tau: float,
                 atm: float, rr25: float, bf25: float, rr10: float, bf10: float,
                 zero_delta_straddle: bool = True,
                 wing_slope_factor: float = 1.0,
+                wing_ext_lambda: Optional[float] = 1.0,
+                wing_flat_delta: float = 0.5,
                 axis_conv: DeltaConvention = AXIS_CONVENTION,
                 ) -> SmileSlice:
     """Construye el smile de un tenor. Todas las vols en DECIMAL."""
@@ -230,4 +300,6 @@ def build_slice(tenor: str, expiry: _dt.date, delivery: _dt.date, tau: float,
                       quotes={"atm": atm, "rr25": rr25, "bf25": bf25,
                               "rr10": rr10, "bf10": bf10},
                       points=pts, wing_slope_factor=wing_slope_factor,
+                      wing_ext_lambda=wing_ext_lambda,
+                      wing_flat_delta=wing_flat_delta,
                       axis_conv=axis_conv).fit()

@@ -52,7 +52,9 @@ for m in (0.95, 1.00, 1.05, 1.10, 1.20):
     K = F * m
     v = vs.vol("USDMXN", exp, K)
     print(f"{K:12.5f} {m:8.4f} {100*v['bid']:11.5f} {100*v['mid']:11.5f} {100*v['ask']:11.5f}")
-print(f"(el spline cubre call delta plano {lo:.2f}–{hi:.2f}; fuera de ahí actúa el ala lineal)")
+sl = s.slice_at(exp)
+print(f"(el spline cubre call delta plano {lo:.2f}–{hi:.2f}; fuera de ahí actúa el ala: "
+      f"parábola hasta el tope σ10+λ(σ10−σ25) en {sl.wing_flat_delta:g} delta, plana más allá)")
 
 if avisos:
     print(f"\nAVISOS ({len(avisos)}):")

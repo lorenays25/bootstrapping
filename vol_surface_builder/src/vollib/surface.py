@@ -100,6 +100,8 @@ class VolSurface:
     warnings: List[str] = field(default_factory=list)
     calendar: Optional[Calendar] = None
     wing_slope_factor: float = 1.0
+    wing_ext_lambda: Optional[float] = 1.0
+    wing_flat_delta: float = 0.5
     zero_delta_straddle: bool = True
 
     def __post_init__(self):
@@ -192,7 +194,9 @@ class VolSurface:
                            self.conv_for(expiry),
                            q["atm"], q["rr25"], q["bf25"], q["rr10"], q["bf10"],
                            zero_delta_straddle=self.zero_delta_straddle,
-                           wing_slope_factor=self.wing_slope_factor)
+                           wing_slope_factor=self.wing_slope_factor,
+                           wing_ext_lambda=self.wing_ext_lambda,
+                           wing_flat_delta=self.wing_flat_delta)
 
     # ------------------------------------------------------- consulta principal
     def vol(self, expiry: _dt.date, strike: float) -> float:

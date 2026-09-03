@@ -192,10 +192,17 @@ def build_all(config: dict, side: str = "mid", verbose: bool = True
             warnings.append(
                 f"[{pair}] sin plazas de feriados configuradas: las fechas de entrega "
                 f"se calculan solo con fines de semana. Agregar `holidays:` al YAML.")
-        # Factor de pendiente del ala (extension lineal mas alla de los nodos de
-        # 10 delta). 1.0 = pendiente tangente pura, que es el valor validado.
+        # Ala mas alla de los nodos de 10 delta. wing_k escala la pendiente
+        # tangente del spline en el nodo; wing_lam fija el tope
+        # (sigma_10 + lam*(sigma_10 - sigma_25)) y wing_flat el delta donde el
+        # ala se vuelve plana. Los tres valores por defecto son los validados
+        # contra el portafolio de valorizacion: ver smile.py, paso 5.
         wing_k = float(spec.get("wing_slope_factor",
                                 config.get("wing_slope_factor", 1.0)))
+        _lam = spec.get("wing_ext_lambda", config.get("wing_ext_lambda", 1.0))
+        wing_lam = None if _lam is None else float(_lam)
+        wing_flat = float(spec.get("wing_flat_delta",
+                                   config.get("wing_flat_delta", 0.5)))
 
         slices, conv_by_tenor = [], {}
         for tenor in dt.sorted_tenors(list(quotes)):
@@ -212,12 +219,14 @@ def build_all(config: dict, side: str = "mid", verbose: bool = True
                 atm=q["atm"], rr25=q["rr25"], bf25=q["bf25"],
                 rr10=q["rr10"], bf10=q["bf10"],
                 zero_delta_straddle=(expiry <= cut_atm),
-                wing_slope_factor=wing_k))
+                wing_slope_factor=wing_k, wing_ext_lambda=wing_lam,
+                wing_flat_delta=wing_flat))
 
         surf = VolSurface(pair=pair, side=side, valuation_date=val,
                           vol_day_count=st["vol_day_count"], conv_by_tenor=conv_by_tenor,
                           fwd=fwd, delivery_lag=lag, slices=slices,
                           calendar=cal, wing_slope_factor=wing_k,
+                          wing_ext_lambda=wing_lam, wing_flat_delta=wing_flat,
                           zero_delta_straddle=(slices[0].expiry <= cut_atm))
         surf._spot_delta_cut_date = cut_spot
         surf.settings = st
